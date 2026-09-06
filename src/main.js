@@ -22,7 +22,7 @@ function setup() {
   const size = getCanvasSize();
   const canvas = createCanvas(size.width, size.height);
   canvas.parent("game-shell");
-  canvas.elt.setAttribute("aria-label", "Archaeology dig site game");
+  canvas.elt.setAttribute("aria-label", "Archaeology excavation and artefact cleaning game");
   pixelDensity(1);
   noLoop();
 

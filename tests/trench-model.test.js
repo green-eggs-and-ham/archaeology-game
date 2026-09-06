@@ -7,9 +7,11 @@ const vm = require("node:vm");
 const sandbox = { window: {} };
 vm.createContext(sandbox);
 vm.runInContext(fs.readFileSync(path.join(__dirname, "../src/game/TrenchModel.js"), "utf8"), sandbox);
+vm.runInContext(fs.readFileSync(path.join(__dirname, "../data/game-config.js"), "utf8"), sandbox);
 const TrenchModel = sandbox.window.TrenchModel;
+const gameConfig = sandbox.window.GameConfig;
 
-function configFor(maxDepth = 16, depthResolutionScale = 2) {
+function configFor(maxDepth = 16, depthResolutionScale = 2, artefactCountMultiplier = 1) {
   return {
     trench: {
       columns: 20,
@@ -18,6 +20,7 @@ function configFor(maxDepth = 16, depthResolutionScale = 2) {
       depthResolutionScale,
       maxDepthDarkening: 0.16,
       artefactFootprintSize: 2,
+      artefactCountMultiplier,
       brushRadius: 1,
       brushTravelPerStampCells: 3,
       scoopRadius: 3,
@@ -64,6 +67,39 @@ test("sixteen-level trenches duplicate seeded reference strata and artefact dept
     assert.equal(artefact.y, original.y);
     assert.equal(artefact.label, original.label);
     assert.equal(artefact.depth, original.depth * 2);
+  });
+});
+
+test("the testing multiplier doubles the seeded artefact set without overlapping footprints", () => {
+  const definition = { id: "doubled", seed: 173, label: "Doubled", layerVariant: 0 };
+  const reference = new TrenchModel(definition, configFor(16, 2, 1));
+  const doubled = new TrenchModel(definition, configFor(16, 2, 2));
+
+  assert.ok(reference.artefacts.length >= 2 && reference.artefacts.length <= 3);
+  assert.equal(doubled.artefacts.length, reference.artefacts.length * 2);
+  assert.ok(doubled.artefacts.length >= 4 && doubled.artefacts.length <= 6);
+  reference.artefacts.forEach((artefact, index) => {
+    const duplicateSequence = doubled.artefacts[index];
+    assert.equal(duplicateSequence.label, artefact.label);
+    assert.equal(duplicateSequence.depth, artefact.depth);
+    assert.deepEqual(JSON.parse(JSON.stringify(duplicateSequence.footprint)), JSON.parse(JSON.stringify(artefact.footprint)));
+  });
+  doubled.artefacts.forEach((artefact, index) => {
+    doubled.artefacts.slice(index + 1).forEach((other) => {
+      assert.equal(doubled.footprintsOverlap(artefact.footprint, other.footprint), false);
+    });
+  });
+});
+
+test("every configured trench creates four to six non-overlapping artefacts", () => {
+  gameConfig.trenches.forEach((definition) => {
+    const trench = new TrenchModel(definition, gameConfig);
+    assert.ok(trench.artefacts.length >= 4 && trench.artefacts.length <= 6);
+    trench.artefacts.forEach((artefact, index) => {
+      trench.artefacts.slice(index + 1).forEach((other) => {
+        assert.equal(trench.footprintsOverlap(artefact.footprint, other.footprint), false);
+      });
+    });
   });
 });
 

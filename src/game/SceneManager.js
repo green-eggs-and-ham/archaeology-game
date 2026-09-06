@@ -13,31 +13,56 @@ window.SceneManager = class SceneManager {
     this.terrainSmoothingMode = "all";
     this.pillarRenderMode = "round";
     this.ridgeDirectionMode = "high-cut";
+    this.performanceMode = "full";
     this.gridCache = null;
     this.ambientBuffer = null;
-    this.terrainStats = { junctionsVisited: 0, junctionsSmoothed: 0, edgeChecks: 0, cacheHits: 0, cacheMisses: 0 };
+    this.terrainStats = {
+      junctionsVisited: 0,
+      junctionsSmoothed: 0,
+      edgeChecks: 0,
+      cacheHits: 0,
+      cacheMisses: 0,
+      lastTimings: {},
+      averageTimings: {},
+      timingSamples: 0
+    };
     this.brushParticles = [];
     this.depositedClumps = [];
     this.effectFrameRequested = false;
     this.mapTiles = [];
     this.layout = {};
+    this.cleaningModel = new window.CleaningModel(config.cleaning || {});
+    this.cleaningTool = "toothbrush";
+    this.cleaningInventoryPage = 0;
+    this.cleaningInventoryView = "all";
+    this.cleaningInventoryChooserOpen = false;
+    this.cleaningWaterDrops = [];
+    this.cleaningRipples = [];
+    this.cleaningDirtParticles = [];
     this.trenches = config.trenches.map((definition) => new window.TrenchModel(definition, config));
+    this.allCollectedArtefacts().forEach((artefact) => this.cleaningModel.ensureState(artefact));
   }
 
   handleResize() {
+    if (this.pointerAction?.type === "cleaning-item") {
+      this.pointerAction.artefact.cleaning.location = this.pointerAction.originLocation;
+    }
+    if (this.currentScene === "cleaning") this.pointerAction = null;
+    this.cleaningInventoryChooserOpen = false;
     this.mapTiles = [];
     this.layout = {};
     this.gridCache = null;
     this.ambientBuffer = null;
+    this.cleaningWaterDrops = [];
+    this.cleaningRipples = [];
+    this.cleaningDirtParticles = [];
   }
 
   draw() {
     this.renderer.drawBackground();
-    if (this.currentScene === "site") {
-      this.drawSiteMap();
-    } else {
-      this.drawTrench();
-    }
+    if (this.currentScene === "site") this.drawSiteMap();
+    else if (this.currentScene === "cleaning") this.drawCleaning();
+    else this.drawTrench();
   }
 
   drawHeading(title, subtitle) {
@@ -53,8 +78,32 @@ window.SceneManager = class SceneManager {
     text(subtitle, 18, 40);
   }
 
+  allCollectedArtefacts() {
+    return this.trenches.flatMap((trench) => trench.artefacts.filter((artefact) => artefact.exposure === "collected"));
+  }
+
+  cleanableCollectedArtefacts() {
+    return this.allCollectedArtefacts().filter((artefact) => artefact.cleanable);
+  }
+
+  pendingCleaningCount() {
+    return this.cleanableCollectedArtefacts().filter((artefact) => {
+      const state = this.cleaningModel.ensureState(artefact);
+      return !["ready-to-identify", "awaiting-specialist"].includes(state.status);
+    }).length;
+  }
+
+  activeCleaningArtefact() {
+    if (this.pointerAction?.type === "cleaning-item") return this.pointerAction.artefact;
+    return this.cleanableCollectedArtefacts().find((artefact) => this.cleaningModel.ensureState(artefact).location !== "inventory") || null;
+  }
+
   drawSiteMap() {
     this.drawHeading("Dig Site", "Choose a trench to start digging.");
+    const labWidth = Math.max(104, Math.min(160, width * 0.24));
+    const labHeight = Math.max(30, Math.min(38, height * 0.09));
+    this.layout.labButton = { x: width - labWidth - 14, y: 12, width: labWidth, height: labHeight };
+    this.renderer.button(this.layout.labButton, `Finds lab (${this.pendingCleaningCount()})`, false, true);
     const tileWidth = Math.min(width * 0.27, height * 0.55);
     const tileHeight = tileWidth * 0.5;
     const originX = width / 2;
@@ -110,6 +159,702 @@ window.SceneManager = class SceneManager {
       textSize(Math.max(8, tileWidth * 0.11));
       text(progress, x + tileWidth * 0.3, y - tileHeight * 0.055);
     }
+  }
+
+  cleaningLayout() {
+    const margin = Math.max(10, width * 0.018);
+    const gap = Math.max(7, width * 0.012);
+    const isPortrait = height > width;
+    const headerHeight = isPortrait
+      ? Math.max(66, Math.min(76, height * 0.14))
+      : Math.max(58, Math.min(68, height * 0.13));
+    const backWidth = Math.max(82, Math.min(118, width * 0.22));
+    const layout = {
+      isPortrait,
+      headerHeight,
+      labBackButton: { x: margin, y: 10, width: backWidth, height: 34 }
+    };
+
+    if (isPortrait) {
+      const inventoryHeight = Math.max(133, Math.min(164, width * 0.38));
+      const lowerHeight = Math.max(126, Math.min(205, width * 0.38));
+      const inventoryY = headerHeight;
+      const matY = inventoryY + inventoryHeight + gap;
+      const lowerY = height - margin - lowerHeight;
+      const lowerWidth = width - margin * 2;
+      const bucketWidth = lowerWidth * 0.42;
+      layout.inventory = { x: margin, y: inventoryY, width: lowerWidth, height: inventoryHeight };
+      layout.mat = { x: margin, y: matY, width: lowerWidth, height: Math.max(1, lowerY - matY - gap) };
+      layout.bucket = { x: margin, y: lowerY, width: bucketWidth, height: lowerHeight };
+      layout.controls = { x: margin + bucketWidth + gap, y: lowerY, width: lowerWidth - bucketWidth - gap, height: lowerHeight };
+    } else {
+      const contentY = headerHeight;
+      const contentHeight = height - contentY - margin;
+      const inventoryWidth = Math.max(145, Math.min(215, width * 0.23));
+      const controlsWidth = Math.max(176, Math.min(230, width * 0.24));
+      layout.inventory = { x: margin, y: contentY, width: inventoryWidth, height: contentHeight };
+      layout.controls = { x: width - margin - controlsWidth, y: contentY, width: controlsWidth, height: contentHeight };
+      layout.mat = {
+        x: margin + inventoryWidth + gap,
+        y: contentY,
+        width: width - margin * 2 - inventoryWidth - controlsWidth - gap * 2,
+        height: contentHeight
+      };
+      const bucketHeight = Math.max(120, Math.min(180, contentHeight * 0.36));
+      layout.bucket = {
+        x: layout.controls.x + 8,
+        y: layout.controls.y + layout.controls.height - bucketHeight - 8,
+        width: layout.controls.width - 16,
+        height: bucketHeight
+      };
+    }
+
+    const controls = layout.controls;
+    if (isPortrait) {
+      const inset = 8;
+      const innerHeight = Math.max(1, controls.height - inset * 2);
+      const buttonGap = Math.max(3, Math.min(5, controls.height * 0.025));
+      const careHeight = Math.max(42, Math.min(58, innerHeight * 0.3));
+      const buttonHeight = Math.max(1, (innerHeight - careHeight - buttonGap * 3) / 3);
+      layout.care = { x: controls.x + inset, y: controls.y + inset, width: controls.width - inset * 2, height: careHeight };
+      layout.toothbrushButton = { x: controls.x + inset, y: layout.care.y + careHeight + buttonGap, width: controls.width - inset * 2, height: buttonHeight };
+      layout.fineBrushButton = { x: controls.x + inset, y: layout.toothbrushButton.y + buttonHeight + buttonGap, width: controls.width - inset * 2, height: buttonHeight };
+      layout.flipButton = { x: controls.x + inset, y: layout.fineBrushButton.y + buttonHeight + buttonGap, width: controls.width - inset * 2, height: buttonHeight };
+    } else {
+      const controlsBottom = layout.bucket.y > controls.y
+        ? layout.bucket.y - 7
+        : controls.y + controls.height;
+      const usableControlsHeight = Math.max(104, controlsBottom - controls.y - 10);
+      const careHeight = Math.max(44, Math.min(92, usableControlsHeight * 0.38));
+      const buttonGap = 5;
+      const buttonHeight = Math.max(25, (usableControlsHeight - careHeight - buttonGap * 4) / 3);
+      layout.care = { x: controls.x + 8, y: controls.y + 8, width: controls.width - 16, height: careHeight };
+      layout.toothbrushButton = { x: controls.x + 8, y: layout.care.y + careHeight + buttonGap, width: controls.width - 16, height: buttonHeight };
+      layout.fineBrushButton = { x: controls.x + 8, y: layout.toothbrushButton.y + buttonHeight + buttonGap, width: controls.width - 16, height: buttonHeight };
+      layout.flipButton = { x: controls.x + 8, y: layout.fineBrushButton.y + buttonHeight + buttonGap, width: controls.width - 16, height: buttonHeight };
+    }
+    return layout;
+  }
+
+  drawCleaning() {
+    this.layout = this.cleaningLayout();
+    this.drawCleaningHeader();
+    this.drawCleaningInventory();
+    this.drawCleaningMat();
+    this.drawCleaningControls();
+    this.drawCleaningBucket();
+    this.drawDraggedCleaningArtefact();
+    this.drawCleaningEffects();
+    this.drawCleaningBrushCursor();
+    this.drawCleaningInventoryChooser();
+  }
+
+  drawCleaningHeader() {
+    const portrait = this.layout.isPortrait;
+    this.renderer.button(
+      this.layout.labBackButton,
+      "Site map",
+      false,
+      false,
+      false,
+      portrait ? { minimumSize: 11, maximumSize: 15 } : {}
+    );
+    const titleX = this.layout.labBackButton.x + this.layout.labBackButton.width + 10;
+    fill("#fff9e9");
+    noStroke();
+    textAlign(LEFT, TOP);
+    textStyle(BOLD);
+    textSize(portrait
+      ? Math.max(20, Math.min(26, width * 0.055))
+      : Math.max(16, Math.min(25, width * 0.032)));
+    text("Finds lab", titleX, 9);
+    textStyle(NORMAL);
+    fill(this.messageTone === "warning" ? "#ffd889" : "#c9d9d8");
+    textSize(portrait
+      ? Math.max(10, Math.min(14, width * 0.026))
+      : Math.max(8, Math.min(12, width * 0.014)));
+    const messageX = portrait ? this.layout.labBackButton.x : titleX;
+    const messageY = portrait ? 45 : 37;
+    text(
+      this.message || "Choose a collected find to clean.",
+      messageX,
+      messageY,
+      width - messageX - (portrait ? this.layout.labBackButton.x : 10),
+      this.layout.headerHeight - messageY
+    );
+  }
+
+  inventoryStatusLabel(artefact) {
+    if (!artefact.cleanable) return "Not available";
+    const status = this.cleaningModel.ensureState(artefact).status;
+    if (status === "ready-to-identify") return "Ready to identify";
+    if (status === "awaiting-specialist") return "Needs specialist";
+    if (status === "ready-to-return") return "Clean";
+    if (status === "wet") return "In progress";
+    return "Dirty";
+  }
+
+  cleaningInventoryViewOptions() {
+    return [
+      { id: "all", label: "All" },
+      { id: "name", label: "Name A-Z" },
+      { id: "dirty", label: "Dirty" },
+      { id: "specialist", label: "Needs specialist" },
+      { id: "identify", label: "Ready to identify" },
+      { id: "other", label: "Other / unavailable" }
+    ];
+  }
+
+  cleaningInventoryViewLabel(view = this.cleaningInventoryView) {
+    return this.cleaningInventoryViewOptions().find((option) => option.id === view)?.label || "All";
+  }
+
+  cleaningInventoryStatusGroup(artefact) {
+    if (!artefact.cleanable) return "other";
+    const status = this.cleaningModel.ensureState(artefact)?.status;
+    if (status === "dirty") return "dirty";
+    if (status === "awaiting-specialist") return "specialist";
+    if (status === "ready-to-identify") return "identify";
+    return "other";
+  }
+
+  cleaningInventoryGrid(isPortrait = this.layout.isPortrait) {
+    return isPortrait ? { columns: 3, rows: 1 } : { columns: 2, rows: 4 };
+  }
+
+  portraitInventoryLabel(label) {
+    const words = String(label || "").trim().split(/\s+/).filter(Boolean);
+    if (words.length < 3) return words.join(" ");
+    let bestIndex = 1;
+    let bestDifference = Infinity;
+    for (let index = 1; index < words.length; index += 1) {
+      const firstLength = words.slice(0, index).join(" ").length;
+      const secondLength = words.slice(index).join(" ").length;
+      const difference = Math.abs(firstLength - secondLength);
+      if (difference < bestDifference) {
+        bestDifference = difference;
+        bestIndex = index;
+      }
+    }
+    return `${words.slice(0, bestIndex).join(" ")}\n${words.slice(bestIndex).join(" ")}`;
+  }
+
+  cleaningInventoryArtefacts() {
+    const active = this.activeCleaningArtefact();
+    const collected = this.allCollectedArtefacts().filter(
+      (artefact) => artefact !== active || artefact.cleaning?.location === "inventory"
+    );
+    const view = this.cleaningInventoryView || "all";
+    const filtered = ["dirty", "specialist", "identify", "other"].includes(view)
+      ? collected.filter((artefact) => this.cleaningInventoryStatusGroup(artefact) === view)
+      : [...collected];
+    if (view === "all") return filtered;
+    return filtered.sort((first, second) => {
+      const byName = String(first.label || "").localeCompare(String(second.label || ""), undefined, { sensitivity: "base" });
+      if (byName !== 0) return byName;
+      return String(first.id || "").localeCompare(String(second.id || ""));
+    });
+  }
+
+  drawCleaningInventory() {
+    const bounds = this.layout.inventory;
+    const portrait = this.layout.isPortrait;
+    this.renderer.panel(bounds.x, bounds.y, bounds.width, bounds.height, "#ead9b9");
+    fill("#25444a");
+    noStroke();
+    textAlign(LEFT, TOP);
+    textStyle(BOLD);
+    textSize(portrait
+      ? Math.max(12, Math.min(16, bounds.height * 0.105))
+      : Math.max(10, Math.min(14, bounds.height * 0.12)));
+    text("COLLECTED FINDS", bounds.x + 9, bounds.y + 7);
+    textStyle(NORMAL);
+
+    const viewButtonHeight = portrait ? 30 : 24;
+    this.layout.inventoryViewButton = {
+      x: bounds.x + 8,
+      y: bounds.y + (portrait ? 25 : 26),
+      width: bounds.width - 16,
+      height: viewButtonHeight
+    };
+    this.renderer.button(
+      this.layout.inventoryViewButton,
+      `View: ${this.cleaningInventoryViewLabel()}`,
+      this.cleaningInventoryView !== "all",
+      true,
+      false,
+      portrait ? { minimumSize: 10, maximumSize: 12 } : { minimumSize: 8, maximumSize: 11 }
+    );
+
+    const active = this.activeCleaningArtefact();
+    const availableArtefacts = this.allCollectedArtefacts().filter(
+      (artefact) => artefact !== active || artefact.cleaning?.location === "inventory"
+    );
+    const artefacts = this.cleaningInventoryArtefacts();
+    const { columns, rows } = this.cleaningInventoryGrid(portrait);
+    const pageSize = columns * rows;
+    const pages = Math.max(1, Math.ceil(artefacts.length / pageSize));
+    this.cleaningInventoryPage = Math.max(0, Math.min(pages - 1, this.cleaningInventoryPage));
+    const footerHeight = pages > 1 ? (portrait ? 22 : 25) : 5;
+    const contentTop = this.layout.inventoryViewButton.y + this.layout.inventoryViewButton.height + 4;
+    const contentHeight = Math.max(1, bounds.y + bounds.height - contentTop - footerHeight);
+    const cellWidth = (bounds.width - 12) / columns;
+    const cellHeight = contentHeight / rows;
+    const visible = artefacts.slice(this.cleaningInventoryPage * pageSize, (this.cleaningInventoryPage + 1) * pageSize);
+    this.layout.inventorySlots = [];
+
+    if (!artefacts.length) {
+      fill("#5c665e");
+      textAlign(CENTER, CENTER);
+      textSize(portrait ? Math.max(10, Math.min(13, bounds.width * 0.04)) : Math.max(9, Math.min(12, bounds.width * 0.055)));
+      text(
+        availableArtefacts.length
+          ? `No finds match ${this.cleaningInventoryViewLabel().toLowerCase()}.`
+          : active
+            ? "The current find is on the cleaning bench."
+            : "Collect a find at the dig site to place it here.",
+        bounds.x + 12,
+        contentTop,
+        bounds.width - 24,
+        contentHeight
+      );
+    }
+
+    visible.forEach((artefact, index) => {
+      if (artefact.cleanable) this.cleaningModel.ensureState(artefact);
+      const column = index % columns;
+      const row = Math.floor(index / columns);
+      const slot = {
+        x: bounds.x + 6 + column * cellWidth + 2,
+        y: contentTop + row * cellHeight + 2,
+        width: cellWidth - 4,
+        height: cellHeight - 4
+      };
+      this.layout.inventorySlots.push({ artefact, bounds: slot });
+      noStroke();
+      fill(artefact.cleanable ? "#d9c7a5" : "#b9ad96");
+      rect(slot.x, slot.y, slot.width, slot.height, 6);
+      const itemSize = portrait
+        ? Math.max(13, Math.min(slot.width * 0.28, slot.height * 0.3))
+        : Math.max(15, Math.min(slot.width * 0.38, slot.height * 0.52));
+      const portraitLabelLines = portrait ? this.portraitInventoryLabel(artefact.label).split("\n") : [];
+      const portraitGroupHeight = itemSize + portraitLabelLines.length * 9.5 + 12;
+      const portraitGroupTop = Math.max(2, (slot.height - portraitGroupHeight) / 2);
+      const itemX = slot.x + slot.width / 2;
+      const itemY = portrait
+        ? slot.y + portraitGroupTop + itemSize / 2
+        : slot.y + itemSize * 0.62;
+      const status = artefact.cleaning?.status;
+      this.renderer.artefact(artefact, itemX, itemY, itemSize, {
+        face: "front",
+        showDirt: artefact.cleanable && !["ready-to-identify", "awaiting-specialist", "ready-to-return"].includes(status)
+      });
+      fill("#25444a");
+      noStroke();
+      textAlign(CENTER, TOP);
+      textStyle(BOLD);
+      textSize(portrait ? Math.max(9, Math.min(11, slot.width / 11)) : Math.max(6, Math.min(9, slot.width / 14)));
+      if (portrait) {
+        portraitLabelLines.forEach((labelLine, lineIndex) => {
+          text(labelLine, slot.x + slot.width / 2, slot.y + portraitGroupTop + itemSize + 1 + lineIndex * 9.5);
+        });
+      } else {
+        text(
+          artefact.label,
+          slot.x + 3,
+          slot.y + itemSize * 1.08,
+          slot.width - 6,
+          Math.max(10, slot.height - itemSize * 1.04 - 14)
+        );
+      }
+      textStyle(NORMAL);
+      fill(status === "ready-to-identify" ? "#39734e" : status === "awaiting-specialist" ? "#8d5c20" : "#5b625d");
+      textSize(portrait ? Math.max(8, Math.min(9.5, slot.width / 13)) : Math.max(5.5, Math.min(7.5, slot.width / 16)));
+      if (portrait) {
+        text(
+          this.inventoryStatusLabel(artefact),
+          slot.x + slot.width / 2,
+          slot.y + portraitGroupTop + itemSize + portraitLabelLines.length * 9.5 + 2
+        );
+      } else {
+        text(this.inventoryStatusLabel(artefact), slot.x + 2, slot.y + slot.height - 11, slot.width - 4, 10);
+      }
+    });
+
+    this.layout.inventoryPreviousButton = null;
+    this.layout.inventoryNextButton = null;
+    if (pages > 1) {
+      const buttonHeight = portrait ? 19 : 18;
+      const buttonWidth = Math.min(portrait ? 76 : 62, (bounds.width - 34) / 2);
+      this.layout.inventoryPreviousButton = { x: bounds.x + 8, y: bounds.y + bounds.height - buttonHeight - 4, width: buttonWidth, height: buttonHeight };
+      this.layout.inventoryNextButton = { x: bounds.x + bounds.width - buttonWidth - 8, y: bounds.y + bounds.height - buttonHeight - 4, width: buttonWidth, height: buttonHeight };
+      const pagingText = portrait ? { minimumSize: 8, maximumSize: 10 } : {};
+      this.renderer.button(this.layout.inventoryPreviousButton, "Previous", false, true, false, pagingText);
+      this.renderer.button(this.layout.inventoryNextButton, "Next", false, true, false, pagingText);
+      fill("#25444a");
+      noStroke();
+      textAlign(CENTER, CENTER);
+      textSize(portrait ? 9 : 7);
+      text(`${this.cleaningInventoryPage + 1}/${pages}`, bounds.x + bounds.width / 2, bounds.y + bounds.height - buttonHeight / 2 - 4);
+    }
+  }
+
+  drawCleaningInventoryChooser() {
+    this.layout.inventoryViewOptions = [];
+    if (!this.cleaningInventoryChooserOpen) return;
+
+    const options = this.cleaningInventoryViewOptions();
+    const portrait = this.layout.isPortrait;
+    const margin = Math.max(10, width * 0.018);
+    const menuWidth = Math.min(420, width - margin * 2);
+    const columns = 2;
+    const rows = Math.ceil(options.length / columns);
+    const gap = 6;
+    const optionHeight = portrait ? 44 : 38;
+    const titleHeight = portrait ? 34 : 30;
+    const menuHeight = titleHeight + rows * optionHeight + (rows + 1) * gap;
+    const preferredY = this.layout.mat.y + (this.layout.mat.height - menuHeight) / 2;
+    const menuY = Math.max(this.layout.headerHeight + 4, Math.min(height - menuHeight - margin, preferredY));
+    const menuX = (width - menuWidth) / 2;
+
+    noStroke();
+    fill(6, 20, 27, 150);
+    rect(0, this.layout.headerHeight, width, height - this.layout.headerHeight);
+    this.renderer.panel(menuX, menuY, menuWidth, menuHeight, "#ead9b9");
+    fill("#25444a");
+    textAlign(CENTER, CENTER);
+    textStyle(BOLD);
+    textSize(portrait ? 13 : 11);
+    text("CHOOSE INVENTORY VIEW", menuX + menuWidth / 2, menuY + titleHeight / 2 + 1);
+    textStyle(NORMAL);
+
+    const optionWidth = (menuWidth - gap * 3) / columns;
+    options.forEach((option, index) => {
+      const column = index % columns;
+      const row = Math.floor(index / columns);
+      const bounds = {
+        x: menuX + gap + column * (optionWidth + gap),
+        y: menuY + titleHeight + gap + row * (optionHeight + gap),
+        width: optionWidth,
+        height: optionHeight
+      };
+      this.layout.inventoryViewOptions.push({ view: option.id, bounds });
+      this.renderer.button(
+        bounds,
+        option.label,
+        this.cleaningInventoryView === option.id,
+        true,
+        false,
+        portrait ? { minimumSize: 10, maximumSize: 12 } : { minimumSize: 9, maximumSize: 11 }
+      );
+    });
+  }
+
+  cleaningItemSize(location = "mat") {
+    const target = location === "bucket" ? this.layout.bucket : this.layout.mat;
+    const multiplier = location === "bucket" ? 0.42 : 0.43;
+    return Math.max(34, Math.min(location === "bucket" ? 88 : 170, Math.min(target.width, target.height) * multiplier));
+  }
+
+  drawCleaningArtefactAt(artefact, centerX, centerY, size, location) {
+    const state = this.cleaningModel.ensureState(artefact);
+    this.renderer.artefact(artefact, centerX, centerY, size, {
+      face: state.activeFace,
+      showDirt: !["ready-to-identify", "awaiting-specialist", "ready-to-return"].includes(state.status),
+      dampened: Boolean(state.dampened && location !== "inventory")
+    });
+    this.layout.cleaningItemBounds = { x: centerX - size * 0.58, y: centerY - size * 0.62, width: size * 1.16, height: size * 1.24, size, location, artefact };
+  }
+
+  drawCleaningMat() {
+    const bounds = this.layout.mat;
+    const portrait = this.layout.isPortrait;
+    this.renderer.panel(bounds.x, bounds.y, bounds.width, bounds.height, "#d6c9aa");
+    fill("#25444a");
+    noStroke();
+    textAlign(LEFT, TOP);
+    textStyle(BOLD);
+    textSize(portrait
+      ? Math.max(12, Math.min(18, bounds.height * 0.075))
+      : Math.max(11, Math.min(16, bounds.height * 0.06)));
+    text("CLEANING MAT", bounds.x + 10, bounds.y + 8);
+    textStyle(NORMAL);
+    fill("#857a65");
+    rect(bounds.x + 10, bounds.y + 32, bounds.width - 20, bounds.height - 44, 12);
+    stroke(255, 255, 255, 28);
+    strokeWeight(1);
+    for (let index = 1; index < 5; index += 1) {
+      line(bounds.x + 12, bounds.y + 32 + (bounds.height - 44) * index / 5, bounds.x + bounds.width - 12, bounds.y + 32 + (bounds.height - 44) * index / 5);
+    }
+    noStroke();
+    this.layout.cleaningItemBounds = null;
+    const artefact = this.activeCleaningArtefact();
+    if (artefact?.cleaning?.location === "mat" && this.pointerAction?.type !== "cleaning-item") {
+      const size = this.cleaningItemSize("mat");
+      const centerX = bounds.x + bounds.width / 2;
+      const centerY = bounds.y + bounds.height * 0.52;
+      this.drawCleaningArtefactAt(artefact, centerX, centerY, size, "mat");
+      fill("#efe4c8");
+      noStroke();
+      textAlign(CENTER, BOTTOM);
+      textSize(portrait ? Math.max(10, Math.min(14, bounds.width * 0.03)) : Math.max(8, Math.min(12, bounds.width * 0.027)));
+      const front = Math.round(this.cleaningModel.progress(artefact, "front") * 100);
+      const back = Math.round(this.cleaningModel.progress(artefact, "back") * 100);
+      text(`Front ${front}%  •  Back ${back}%`, bounds.x + bounds.width / 2, bounds.y + bounds.height - 12);
+    } else if (!artefact) {
+      fill("#d8cfb6");
+      textAlign(CENTER, CENTER);
+      textSize(portrait ? Math.max(10, Math.min(14, bounds.width * 0.032)) : Math.max(9, Math.min(13, bounds.width * 0.03)));
+      text("Wet a dirty find, then place it here.", bounds.x + 20, bounds.y + 42, bounds.width - 40, bounds.height - 60);
+    }
+  }
+
+  drawCleaningControls() {
+    const bounds = this.layout.controls;
+    const portrait = this.layout.isPortrait;
+    this.renderer.panel(bounds.x, bounds.y, bounds.width, bounds.height, "#ead9b9");
+    const artefact = this.activeCleaningArtefact();
+    fill("#25444a");
+    noStroke();
+    textAlign(LEFT, TOP);
+    textStyle(BOLD);
+    textSize(portrait ? Math.max(10, Math.min(13, this.layout.care.height * 0.23)) : Math.max(8, Math.min(12, this.layout.care.height * 0.2)));
+    text(
+      artefact ? artefact.label : "CARE CARD",
+      this.layout.care.x,
+      this.layout.care.y + (portrait ? 1 : 0),
+      this.layout.care.width,
+      this.layout.care.height * (portrait ? 0.4 : 0.45)
+    );
+    textStyle(NORMAL);
+    textSize(portrait ? Math.max(9, Math.min(11, this.layout.care.height * 0.19)) : Math.max(6.5, Math.min(10, this.layout.care.height * 0.16)));
+    if (artefact) {
+      const care = artefact.cleaningTool === "toothbrush"
+        ? "Toothbrush fastest; fine brush also safe"
+        : "Use fine paintbrush";
+      text(
+        `${artefact.material}\n${artefact.robustness} • ${care}`,
+        this.layout.care.x,
+        this.layout.care.y + this.layout.care.height * (portrait ? 0.37 : 0.43),
+        this.layout.care.width,
+        this.layout.care.height * (portrait ? 0.63 : 0.57)
+      );
+    } else {
+      text(
+        "Move a collected coin or pottery sherd into the bucket.",
+        this.layout.care.x,
+        this.layout.care.y + this.layout.care.height * (portrait ? 0.34 : 0.38),
+        this.layout.care.width,
+        this.layout.care.height * (portrait ? 0.66 : 0.62)
+      );
+    }
+    const buttonText = portrait ? { minimumSize: 10, maximumSize: 13 } : {};
+    this.renderer.button(this.layout.toothbrushButton, "Toothbrush", this.cleaningTool === "toothbrush", true, false, buttonText);
+    this.renderer.button(this.layout.fineBrushButton, "Fine paintbrush", this.cleaningTool === "fine-brush", true, false, buttonText);
+    const face = artefact?.cleaning?.activeFace === "back" ? "Back" : "Front";
+    this.renderer.button(this.layout.flipButton, `Flip: ${face}`, false, true, false, buttonText);
+  }
+
+  drawCleaningBucket() {
+    const bounds = this.layout.bucket;
+    const portrait = this.layout.isPortrait;
+    if (bounds.y !== this.layout.controls.y || bounds.x !== this.layout.controls.x) {
+      this.renderer.panel(bounds.x, bounds.y, bounds.width, bounds.height, "#d9cdb1");
+    }
+    fill("#25444a");
+    noStroke();
+    textAlign(CENTER, TOP);
+    textStyle(BOLD);
+    textSize(portrait ? Math.max(12, Math.min(15, bounds.height * 0.095)) : Math.max(9, Math.min(13, bounds.height * 0.09)));
+    text("CLEAN WATER", bounds.x + bounds.width / 2, bounds.y + 7);
+    textStyle(NORMAL);
+    const bucketWidth = bounds.width * 0.82;
+    const bucketHeight = bounds.height * 0.64;
+    const centerX = bounds.x + bounds.width / 2;
+    const waterY = bounds.y + bounds.height * 0.38;
+    noStroke();
+    fill("#6d7b7d");
+    rect(centerX - bucketWidth * 0.44, waterY, bucketWidth * 0.88, bucketHeight * 0.72, 0, 0, 12, 12);
+    const canImmerse = this.pointerAction?.type === "cleaning-item" && this.pointerAction.originLocation === "inventory";
+    if (canImmerse) {
+      noFill();
+      stroke(190, 240, 244, 135);
+      strokeWeight(Math.max(2, bucketWidth * 0.025));
+      ellipse(centerX, waterY, bucketWidth * 1.08, Math.max(44, bucketHeight * 0.5));
+      noStroke();
+    }
+    fill(canImmerse ? "#84cad3" : "#70b7c4");
+    ellipse(centerX, waterY, bucketWidth, bucketHeight * 0.34);
+    this.layout.bucketWater = { x: centerX - bucketWidth / 2, y: waterY - bucketHeight * 0.17, width: bucketWidth, height: bucketHeight * 0.34 };
+    const dropWidth = Math.min(bounds.width - 12, bucketWidth * 1.15);
+    const dropHeight = Math.min(bounds.height * 0.48, Math.max(44, bucketHeight * 0.5));
+    this.layout.bucketDropTarget = {
+      x: centerX - dropWidth / 2,
+      y: waterY - dropHeight / 2,
+      width: dropWidth,
+      height: dropHeight
+    };
+    const artefact = this.activeCleaningArtefact();
+    if (artefact?.cleaning?.location === "bucket" && this.pointerAction?.type !== "cleaning-item") {
+      const size = this.cleaningItemSize("bucket");
+      this.drawCleaningArtefactAt(artefact, centerX, waterY + size * 0.08, size, "bucket");
+      fill(88, 168, 183, 115);
+      noStroke();
+      ellipse(centerX, waterY + size * 0.12, bucketWidth * 0.88, bucketHeight * 0.25);
+    }
+    noFill();
+    stroke("#f2e2bd");
+    strokeWeight(Math.max(2, bucketWidth * 0.035));
+    arc(centerX, waterY, bucketWidth, bucketHeight * 0.34, 0, Math.PI);
+  }
+
+  drawDraggedCleaningArtefact() {
+    if (this.pointerAction?.type !== "cleaning-item") return;
+    const { artefact, x, y } = this.pointerAction;
+    const size = Math.max(42, Math.min(130, this.cleaningItemSize("mat") * 0.8));
+    this.renderer.artefact(artefact, x, y, size, {
+      face: artefact.cleaning.activeFace,
+      showDirt: !["ready-to-identify", "awaiting-specialist", "ready-to-return"].includes(artefact.cleaning.status),
+      dampened: Boolean(artefact.cleaning.dampened && this.pointerAction.originLocation !== "inventory")
+    });
+  }
+
+  drawCleaningBrushCursor() {
+    const item = this.layout.cleaningItemBounds;
+    const artefact = item?.artefact;
+    if (!this.pointer || !artefact || item.location !== "mat" || this.pointerAction?.type === "cleaning-item") return;
+    if (!this.pointIn(item, this.pointer.x, this.pointer.y)) return;
+    const radius = item.size * this.cleaningModel.brushRadii[this.cleaningTool];
+    noFill();
+    stroke(this.cleaningModel.canUseTool(artefact, this.cleaningTool) ? "#e8f4e9" : "#ffd889");
+    strokeWeight(1.4);
+    circle(this.pointer.x, this.pointer.y, radius * 2);
+  }
+
+  cleaningEffectsConfig() {
+    return {
+      waterDroplets: 10,
+      waterRipples: 2,
+      waterDuration: 500,
+      dirtParticlesPerEvent: 8,
+      dirtParticleLimit: 80,
+      dirtDuration: 320,
+      ...(this.config.cleaning?.effects || {})
+    };
+  }
+
+  spawnCleaningWaterEffects() {
+    const water = this.layout.bucketWater;
+    if (!water || typeof millis !== "function") return;
+    const settings = this.cleaningEffectsConfig();
+    const startedAt = millis();
+    const centerX = water.x + water.width / 2;
+    const centerY = water.y + water.height / 2;
+    for (let index = 0; index < settings.waterDroplets; index += 1) {
+      this.cleaningWaterDrops.push({
+        x: centerX + (Math.random() - 0.5) * water.width * 0.58,
+        y: centerY + (Math.random() - 0.5) * water.height * 0.2,
+        vx: (Math.random() - 0.5) * 0.07,
+        vy: -0.05 - Math.random() * 0.08,
+        size: 1.8 + Math.random() * 2.7,
+        startedAt,
+        duration: settings.waterDuration * (0.72 + Math.random() * 0.28)
+      });
+    }
+    for (let index = 0; index < settings.waterRipples; index += 1) {
+      this.cleaningRipples.push({
+        x: centerX,
+        y: centerY,
+        startWidth: water.width * (0.18 + index * 0.12),
+        endWidth: water.width * (0.72 + index * 0.13),
+        ratio: water.height / Math.max(1, water.width),
+        startedAt: startedAt + index * 55,
+        duration: settings.waterDuration
+      });
+    }
+    this.scheduleEffectFrame();
+  }
+
+  spawnCleaningDirtParticles(affectedSpots, item = this.layout.cleaningItemBounds) {
+    if (!affectedSpots?.length || !item || typeof millis !== "function") return;
+    const settings = this.cleaningEffectsConfig();
+    const available = Math.max(0, settings.dirtParticleLimit - this.cleaningDirtParticles.length);
+    const count = Math.min(settings.dirtParticlesPerEvent, available, affectedSpots.length);
+    if (!count) return;
+    const startedAt = millis();
+    const centerX = item.x + item.width / 2;
+    const centerY = item.y + item.height / 2;
+    for (let index = 0; index < count; index += 1) {
+      const spot = affectedSpots[Math.floor(index * affectedSpots.length / count)];
+      this.cleaningDirtParticles.push({
+        x: centerX + spot.x * item.size,
+        y: centerY + spot.y * item.size,
+        vx: (Math.random() - 0.5) * 0.055,
+        vy: -0.025 - Math.random() * 0.035,
+        size: Math.max(1.4, item.size * (0.012 + Math.random() * 0.014)),
+        amount: spot.amount,
+        startedAt,
+        duration: settings.dirtDuration * (0.8 + Math.random() * 0.25)
+      });
+    }
+    this.scheduleEffectFrame();
+  }
+
+  drawCleaningEffects() {
+    if (typeof millis !== "function") return;
+    const now = millis();
+    this.cleaningWaterDrops = this.cleaningWaterDrops.filter((particle) => now - particle.startedAt < particle.duration);
+    this.cleaningRipples = this.cleaningRipples.filter((ripple) => now - ripple.startedAt < ripple.duration);
+    this.cleaningDirtParticles = this.cleaningDirtParticles.filter((particle) => now - particle.startedAt < particle.duration);
+
+    this.cleaningRipples.forEach((ripple) => {
+      const progress = Math.max(0, (now - ripple.startedAt) / ripple.duration);
+      const rippleWidth = ripple.startWidth + (ripple.endWidth - ripple.startWidth) * progress;
+      noFill();
+      stroke(221, 250, 252, 150 * (1 - progress));
+      strokeWeight(1.4);
+      ellipse(ripple.x, ripple.y, rippleWidth, rippleWidth * ripple.ratio);
+    });
+    this.cleaningWaterDrops.forEach((particle) => {
+      const elapsed = now - particle.startedAt;
+      const progress = elapsed / particle.duration;
+      noStroke();
+      fill(148, 222, 235, 220 * (1 - progress));
+      circle(
+        particle.x + particle.vx * elapsed,
+        particle.y + particle.vy * elapsed + progress * progress * 18,
+        particle.size * (1 - progress * 0.25)
+      );
+    });
+    this.cleaningDirtParticles.forEach((particle, index) => {
+      const elapsed = now - particle.startedAt;
+      const progress = elapsed / particle.duration;
+      noStroke();
+      const alpha = (120 + particle.amount * 100) * (1 - progress);
+      fill(index % 2 ? 105 : 76, index % 2 ? 76 : 54, index % 2 ? 46 : 35, alpha);
+      circle(
+        particle.x + particle.vx * elapsed,
+        particle.y + particle.vy * elapsed + progress * progress * 6,
+        particle.size * (1 - progress * 0.35)
+      );
+    });
+
+    if (this.cleaningWaterDrops.length || this.cleaningRipples.length || this.cleaningDirtParticles.length) {
+      this.scheduleEffectFrame();
+    }
+  }
+
+  handleCleaningBrushResult(result, item = this.layout.cleaningItemBounds) {
+    if (!result) return;
+    if (result.affectedSpots?.length) this.spawnCleaningDirtParticles(result.affectedSpots, item);
+    if (result.complete) {
+      this.message = "Both faces are clean. Drag the find back to the inventory tray.";
+    } else if (result.faceComplete) {
+      this.message = "This face is clean. Use Flip to clean the other side.";
+    } else if (result.changed) {
+      this.message = "Keep brushing gently across the dirty areas.";
+    }
+    if (result.changed) this.messageTone = "neutral";
   }
 
   trenchLayout() {
@@ -183,27 +928,38 @@ window.SceneManager = class SceneManager {
     const diagnosticGap = 6;
     const diagnosticButtons = this.diagnosticButtonLayout(width, diagnosticY, diagnosticHeight, diagnosticGap);
     this.layout.depthButton = diagnosticButtons.depth;
+    this.layout.performanceButton = diagnosticButtons.performance;
     this.layout.smoothingButton = diagnosticButtons.smoothing;
     this.layout.pillarButton = diagnosticButtons.pillar;
     this.layout.ridgeButton = diagnosticButtons.ridge;
     this.renderer.button(this.layout.depthButton, "Depths", this.showDepthDebug, true);
     this.renderer.button(
+      this.layout.performanceButton,
+      this.performanceMode === "full" ? "Performance: Full" : "Performance: Lite",
+      this.performanceMode === "lite",
+      true
+    );
+    const terrainControlsDisabled = this.performanceMode === "lite";
+    this.renderer.button(
       this.layout.smoothingButton,
       this.terrainSmoothingMode === "all" ? "Smooth A: All" : "Smooth B: Focus",
       this.terrainSmoothingMode === "focus",
-      true
+      true,
+      terrainControlsDisabled
     );
     this.renderer.button(
       this.layout.pillarButton,
       this.pillarRenderMode === "round" ? "Pillars A: Round" : "Pillars B: Merge",
       this.pillarRenderMode === "merge",
-      true
+      true,
+      terrainControlsDisabled
     );
     this.renderer.button(
       this.layout.ridgeButton,
       this.ridgeDirectionMode === "current" ? "Ridges A: Current" : "Ridges B: High cut",
       this.ridgeDirectionMode === "high-cut",
-      true
+      true,
+      terrainControlsDisabled
     );
 
     const titleSize = Math.max(12, width * 0.025);
@@ -265,6 +1021,7 @@ window.SceneManager = class SceneManager {
     return [
       trench.id,
       trench.visualRevision,
+      this.performanceMode,
       this.terrainSmoothingMode,
       this.pillarRenderMode,
       this.ridgeDirectionMode,
@@ -277,35 +1034,56 @@ window.SceneManager = class SceneManager {
   }
 
   renderExcavationGrid(trench, grid) {
+    const totalStartedAt = this.terrainTimingNow();
     this.renderer.panel(grid.x - 5, grid.y - 5, grid.width + 10, grid.height + 10, "#3b2f25");
     noStroke();
     fill("#665e50");
     rect(grid.x, grid.y, grid.width, grid.height, 4);
-    const surfaceField = this.buildVisibleSurfaceField(trench);
+    const fieldStartedAt = this.terrainTimingNow();
+    const surfaceField = this.buildVisibleSurfaceField(trench, { lightweight: this.performanceMode === "lite" });
+    const fieldDuration = this.terrainTimingNow() - fieldStartedAt;
     const terrainContext = drawingContext;
     terrainContext.save();
     terrainContext.beginPath();
     terrainContext.rect(grid.x, grid.y, grid.width, grid.height);
     terrainContext.clip();
     this.drawBaseTerrain(surfaceField, trench, grid);
-    const junctions = this.buildLocalJunctionDescriptors(surfaceField, trench, grid);
-    const regions = this.collectCompleteSurfaceRegions(surfaceField, trench, grid, junctions);
-    const ambientBatches = this.collectAmbientOcclusion(surfaceField, trench, grid, junctions);
-    const ambientBuffer = this.buildAmbientOcclusionBuffer(ambientBatches, regions, grid);
-    this.drawDepthCompositedTerrain(surfaceField, trench, grid, regions, ambientBuffer);
+    let topologyDuration = 0;
+    let ambientDuration = 0;
+    let compositeDuration = 0;
+    if (this.performanceMode === "lite") {
+      this.terrainStats.junctionsVisited = 0;
+      this.terrainStats.junctionsSmoothed = 0;
+      const compositeStartedAt = this.terrainTimingNow();
+      this.drawTerrainPatterns(surfaceField, trench, grid);
+      this.drawLiteAmbientOcclusion(surfaceField, trench, grid);
+      compositeDuration = this.terrainTimingNow() - compositeStartedAt;
+    } else {
+      const topologyStartedAt = this.terrainTimingNow();
+      const junctions = this.buildLocalJunctionDescriptors(surfaceField, trench, grid);
+      const regions = this.collectCompleteSurfaceRegions(surfaceField, trench, grid, junctions);
+      const preparedRegions = this.prepareSurfaceRegions(regions, trench);
+      topologyDuration = this.terrainTimingNow() - topologyStartedAt;
+      const ambientStartedAt = this.terrainTimingNow();
+      const ambientBatches = this.collectAmbientOcclusion(surfaceField, trench, grid, junctions);
+      const ambientBuffer = this.buildAmbientOcclusionBuffer(ambientBatches, regions, grid);
+      ambientDuration = this.terrainTimingNow() - ambientStartedAt;
+      const compositeStartedAt = this.terrainTimingNow();
+      const patternGroups = this.buildTerrainPatternGroups(surfaceField, trench);
+      this.drawDepthCompositedTerrain(surfaceField, trench, grid, regions, ambientBuffer, preparedRegions, patternGroups);
+      compositeDuration = this.terrainTimingNow() - compositeStartedAt;
+    }
     terrainContext.restore();
     if (this.showDepthDebug) this.drawDepthDebug(trench, grid);
 
     trench.artefacts.forEach((artefact) => {
       if (artefact.exposure === "partial" || artefact.exposure === "revealed") {
-        this.renderer.artefactShape(
-          artefact.shape,
+        this.renderer.artefact(
+          artefact,
           grid.x + (artefact.centerX + 0.5) * grid.cellSize,
           grid.y + (artefact.centerY + 0.5) * grid.cellSize,
           Math.max(10, grid.cellSize * 1.45),
-          artefact.colour,
-          false,
-          artefact.exposure === "partial"
+          { partial: artefact.exposure === "partial" }
         );
       }
     });
@@ -314,9 +1092,30 @@ window.SceneManager = class SceneManager {
     stroke("#f5e6bb");
     strokeWeight(2);
     rect(grid.x, grid.y, grid.width, grid.height, 3);
+    this.recordTerrainTimings({
+      total: this.terrainTimingNow() - totalStartedAt,
+      field: fieldDuration,
+      topology: topologyDuration,
+      ambient: ambientDuration,
+      composite: compositeDuration
+    });
   }
 
-  buildVisibleSurfaceField(trench) {
+  terrainTimingNow() {
+    return typeof performance !== "undefined" && typeof performance.now === "function" ? performance.now() : Date.now();
+  }
+
+  recordTerrainTimings(timings) {
+    this.terrainStats.lastTimings = { mode: this.performanceMode, ...timings };
+    const sample = Math.min(60, (this.terrainStats.timingSamples || 0) + 1);
+    Object.entries(timings).forEach(([name, value]) => {
+      const previous = this.terrainStats.averageTimings[name] || 0;
+      this.terrainStats.averageTimings[name] = previous + (value - previous) / sample;
+    });
+    this.terrainStats.timingSamples = sample;
+  }
+
+  buildVisibleSurfaceField(trench, options = {}) {
     const field = Array.from({ length: trench.rows }, (_, y) =>
       Array.from({ length: trench.columns }, (_, x) => {
         const depth = trench.getDepth(x, y);
@@ -336,11 +1135,13 @@ window.SceneManager = class SceneManager {
       })
     );
 
-    if (this.pillarRenderMode === "merge") this.mergeSmallExtrema(field, trench);
-    const components = this.buildCardinalComponents(field, (cell) => cell.signature);
-    components.items.forEach((component) => {
-      component.cells.forEach((cell) => { field[cell.y][cell.x].componentSize = component.cells.length; });
-    });
+    if (!options.lightweight) {
+      if (this.pillarRenderMode === "merge") this.mergeSmallExtrema(field, trench);
+      const components = this.buildCardinalComponents(field, (cell) => cell.signature);
+      components.items.forEach((component) => {
+        component.cells.forEach((cell) => { field[cell.y][cell.x].componentSize = component.cells.length; });
+      });
+    }
     return field;
   }
 
@@ -469,26 +1270,97 @@ window.SceneManager = class SceneManager {
     return `rgb(${channel(16)}, ${channel(8)}, ${channel(0)})`;
   }
 
-  drawTerrainPatterns(field, trench, grid, depth = null) {
-    stroke(255, 255, 255, 38);
-    strokeWeight(Math.max(0.7, grid.cellSize * 0.035));
+  buildTerrainPatternGroups(field, trench) {
+    const groups = new Map();
     for (let y = 0; y < trench.rows; y += 1) {
       for (let x = 0; x < trench.columns; x += 1) {
-        if (depth !== null && field[y][x].depth !== depth) continue;
         if ((x * 7 + y * 11) % 3 !== 0) continue;
-        const layer = field[y][x].layer;
-        const left = grid.x + x * grid.cellSize;
-        const top = grid.y + y * grid.cellSize;
-        if (layer.pattern === "dots" || layer.pattern === "specks") {
-          point(left + grid.cellSize * 0.5, top + grid.cellSize * 0.5);
-        } else if (layer.pattern === "lines") {
-          line(left + grid.cellSize * 0.4, top + grid.cellSize * 0.6, left + grid.cellSize * 0.6, top + grid.cellSize * 0.4);
-        } else if (layer.pattern === "cracks") {
-          line(left + grid.cellSize * 0.4, top + grid.cellSize * 0.4, left + grid.cellSize * 0.51, top + grid.cellSize * 0.51);
-          line(left + grid.cellSize * 0.51, top + grid.cellSize * 0.51, left + grid.cellSize * 0.6, top + grid.cellSize * 0.44);
+        const surface = field[y][x];
+        if (!groups.has(surface.depth)) groups.set(surface.depth, []);
+        groups.get(surface.depth).push({ x, y, layer: surface.layer });
+      }
+    }
+    return groups;
+  }
+
+  drawTerrainPatterns(field, trench, grid, depth = null, patternGroups = null) {
+    stroke(255, 255, 255, 38);
+    strokeWeight(Math.max(0.7, grid.cellSize * 0.035));
+    const groups = patternGroups || this.buildTerrainPatternGroups(field, trench);
+    const entries = depth === null ? [...groups.values()].flat() : (groups.get(depth) || []);
+    entries.forEach(({ x, y, layer }) => {
+      const left = grid.x + x * grid.cellSize;
+      const top = grid.y + y * grid.cellSize;
+      if (layer.pattern === "dots" || layer.pattern === "specks") {
+        point(left + grid.cellSize * 0.5, top + grid.cellSize * 0.5);
+      } else if (layer.pattern === "lines") {
+        line(left + grid.cellSize * 0.4, top + grid.cellSize * 0.6, left + grid.cellSize * 0.6, top + grid.cellSize * 0.4);
+      } else if (layer.pattern === "cracks") {
+        line(left + grid.cellSize * 0.4, top + grid.cellSize * 0.4, left + grid.cellSize * 0.51, top + grid.cellSize * 0.51);
+        line(left + grid.cellSize * 0.51, top + grid.cellSize * 0.51, left + grid.cellSize * 0.6, top + grid.cellSize * 0.44);
+      }
+    });
+  }
+
+  colourChannels(sourceColour) {
+    const hex = /^#([0-9a-f]{6})$/i.exec(sourceColour || "");
+    if (hex) {
+      const value = Number.parseInt(hex[1], 16);
+      return [(value >> 16) & 0xff, (value >> 8) & 0xff, value & 0xff];
+    }
+    const rgb = /^rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)/i.exec(sourceColour || "");
+    return rgb ? rgb.slice(1, 4).map(Number) : [84, 72, 58];
+  }
+
+  preblendedShadowColour(sourceColour, amount) {
+    const source = this.colourChannels(sourceColour);
+    const shadow = [18, 24, 29];
+    const blend = Math.max(0, Math.min(1, amount));
+    const channels = source.map((channel, index) => Math.round(channel + (shadow[index] - channel) * blend));
+    return `rgb(${channels[0]}, ${channels[1]}, ${channels[2]})`;
+  }
+
+  drawLiteAmbientOcclusion(field, trench, grid) {
+    const records = [];
+    const overlap = this.terrainSeamOverlap(grid);
+    this.terrainStats.edgeChecks = 0;
+    const addEdge = (first, second, orientation, edge, start) => {
+      this.terrainStats.edgeChecks += 1;
+      if (first.depth === second.depth) return;
+      const deeperIsFirst = first.depth > second.depth;
+      const deeper = deeperIsFirst ? first : second;
+      const difference = Math.abs(first.depth - second.depth);
+      const style = this.aoStyle(difference, grid);
+      const width = Math.max(1, Math.min(grid.cellSize * 0.3, style.width));
+      records.push({ deeper, difference, style, width, orientation, edge, start, deeperIsFirst });
+    };
+
+    for (let y = 0; y < trench.rows; y += 1) {
+      for (let x = 0; x < trench.columns; x += 1) {
+        if (x + 1 < trench.columns) {
+          addEdge(field[y][x], field[y][x + 1], "vertical", grid.x + (x + 1) * grid.cellSize, grid.y + y * grid.cellSize);
+        }
+        if (y + 1 < trench.rows) {
+          addEdge(field[y][x], field[y + 1][x], "horizontal", grid.y + (y + 1) * grid.cellSize, grid.x + x * grid.cellSize);
         }
       }
     }
+
+    records.sort((first, second) => first.difference - second.difference);
+    const context = drawingContext;
+    records.forEach((record) => {
+      context.fillStyle = this.preblendedShadowColour(
+        record.deeper.renderColour || record.deeper.layer.colour,
+        Math.min(0.48, record.style.alpha * 0.9)
+      );
+      if (record.orientation === "vertical") {
+        const x = record.deeperIsFirst ? record.edge - record.width : record.edge;
+        context.fillRect(x, record.start - overlap, record.width, grid.cellSize + overlap * 2);
+      } else {
+        const y = record.deeperIsFirst ? record.edge - record.width : record.edge;
+        context.fillRect(record.start - overlap, y, grid.cellSize + overlap * 2, record.width);
+      }
+    });
   }
 
   junctionGroups(samples) {
@@ -726,11 +1598,38 @@ window.SceneManager = class SceneManager {
     );
   }
 
+  prepareSurfaceRegions(regions, trench) {
+    const ordered = this.orderedSurfaceRegions(regions, trench);
+    const supportsPaths = typeof Path2D === "function";
+    const byDepth = new Map();
+    ordered.forEach((region) => {
+      if (supportsPaths && !region.compiledPath) {
+        region.compiledPath = new Path2D();
+        this.appendSurfaceRegionPath(region.compiledPath, region);
+      }
+      const depth = region.surface.depth;
+      if (!byDepth.has(depth)) byDepth.set(depth, { depth, regions: [], compiledPath: supportsPaths ? new Path2D() : null });
+      const group = byDepth.get(depth);
+      group.regions.push(region);
+      if (group.compiledPath && region.compiledPath && typeof group.compiledPath.addPath === "function") {
+        group.compiledPath.addPath(region.compiledPath);
+      }
+    });
+    return {
+      ordered,
+      byDepth: [...byDepth.values()].sort((first, second) => second.depth - first.depth)
+    };
+  }
+
   drawSurfaceRegion(region, context = drawingContext) {
-    context.beginPath();
-    this.appendSurfaceRegionPath(context, region);
     context.fillStyle = region.surface.renderColour || region.surface.layer.colour;
-    context.fill("evenodd");
+    if (region.compiledPath) {
+      context.fill(region.compiledPath, "evenodd");
+    } else {
+      context.beginPath();
+      this.appendSurfaceRegionPath(context, region);
+      context.fill("evenodd");
+    }
   }
 
   drawBatchedJunctionSurfaces(regions, trench, context = drawingContext) {
@@ -1014,9 +1913,13 @@ window.SceneManager = class SceneManager {
       const region = regions.get(signature);
       if (!region || !batch.polygons.length) return;
       context.save();
-      context.beginPath();
-      this.appendSurfaceRegionPath(context, region);
-      context.clip("evenodd");
+      if (region.compiledPath) {
+        context.clip(region.compiledPath, "evenodd");
+      } else {
+        context.beginPath();
+        this.appendSurfaceRegionPath(context, region);
+        context.clip("evenodd");
+      }
       this.drawAmbientBatch(batch, context, true);
       context.restore();
     });
@@ -1024,19 +1927,22 @@ window.SceneManager = class SceneManager {
     return buffer;
   }
 
-  drawDepthCompositedTerrain(field, trench, grid, regions, ambientBuffer) {
+  drawDepthCompositedTerrain(field, trench, grid, regions, ambientBuffer, preparedRegions = null, patternGroups = null) {
     const context = drawingContext;
-    const orderedRegions = this.orderedSurfaceRegions(regions, trench);
-    const depths = [...new Set(orderedRegions.map((region) => region.surface.depth))].sort((first, second) => second - first);
-    depths.forEach((depth) => {
-      const depthRegions = orderedRegions.filter((region) => region.surface.depth === depth);
-      depthRegions.forEach((region) => this.drawSurfaceRegion(region, context));
-      this.drawTerrainPatterns(field, trench, grid, depth);
+    const prepared = preparedRegions || this.prepareSurfaceRegions(regions, trench);
+    const patterns = patternGroups || this.buildTerrainPatternGroups(field, trench);
+    prepared.byDepth.forEach((depthGroup) => {
+      depthGroup.regions.forEach((region) => this.drawSurfaceRegion(region, context));
+      this.drawTerrainPatterns(field, trench, grid, depthGroup.depth, patterns);
       if (!ambientBuffer) return;
       context.save();
-      context.beginPath();
-      depthRegions.forEach((region) => this.appendSurfaceRegionPath(context, region));
-      context.clip("evenodd");
+      if (depthGroup.compiledPath) {
+        context.clip(depthGroup.compiledPath, "evenodd");
+      } else {
+        context.beginPath();
+        depthGroup.regions.forEach((region) => this.appendSurfaceRegionPath(context, region));
+        context.clip("evenodd");
+      }
       context.drawImage(ambientBuffer.canvas, grid.x, grid.y, grid.width, grid.height);
       context.restore();
     });
@@ -1061,14 +1967,16 @@ window.SceneManager = class SceneManager {
   }
 
   diagnosticButtonLayout(totalWidth, y, buttonHeight, gap = 6) {
-    const usableWidth = totalWidth - 24 - gap * 3;
-    const depthWidth = usableWidth * 0.16;
-    const comparisonWidth = (usableWidth - depthWidth) / 3;
+    const usableWidth = totalWidth - 24 - gap * 4;
+    const depthWidth = usableWidth * 0.13;
+    const performanceWidth = usableWidth * 0.18;
+    const comparisonWidth = (usableWidth - depthWidth - performanceWidth) / 3;
     const depth = { x: 12, y, width: depthWidth, height: buttonHeight };
-    const smoothing = { x: depth.x + depth.width + gap, y, width: comparisonWidth, height: buttonHeight };
+    const performance = { x: depth.x + depth.width + gap, y, width: performanceWidth, height: buttonHeight };
+    const smoothing = { x: performance.x + performance.width + gap, y, width: comparisonWidth, height: buttonHeight };
     const pillar = { x: smoothing.x + smoothing.width + gap, y, width: comparisonWidth, height: buttonHeight };
     const ridge = { x: pillar.x + pillar.width + gap, y, width: comparisonWidth, height: buttonHeight };
-    return { depth, smoothing, pillar, ridge };
+    return { depth, performance, smoothing, pillar, ridge };
   }
 
   drawProfile(trench, profile) {
@@ -1152,14 +2060,12 @@ window.SceneManager = class SceneManager {
         const markerOffset = matchingMarkers * Math.max(4, profile.width * 0.025);
         const x = inner.x + (artefact.centerX + 0.5) * columnWidth;
         const y = inner.y + (artefact.depth + 0.5) * levelHeight;
-        this.renderer.artefactShape(
-          artefact.shape,
+        this.renderer.artefact(
+          artefact,
           x + markerOffset,
           y,
           Math.max(7, Math.min(columnWidth * 1.45, levelHeight * (trench.depthResolutionScale || 1) * 1.45)),
-          artefact.colour,
-          artefact.exposure === "collected",
-          artefact.exposure === "partial"
+          { collected: artefact.exposure === "collected", partial: artefact.exposure === "partial" }
         );
       }
     });
@@ -1357,7 +2263,7 @@ window.SceneManager = class SceneManager {
     collected.slice(0, 3).forEach((artefact, index) => {
       const itemX = inventory.x + itemSize / 2 + index * itemGap;
       const itemY = inventory.y + inventory.height - itemSize / 2 - 1;
-      this.renderer.artefactShape(artefact.shape, itemX, itemY, itemSize, artefact.colour, true);
+      this.renderer.artefact(artefact, itemX, itemY, itemSize, { collected: true });
       if (inventory.width >= 150) {
         fill("#c9d9d8");
         textAlign(CENTER, TOP);
@@ -1384,6 +2290,23 @@ window.SceneManager = class SceneManager {
 
   pointIn(bounds, x, y) {
     return x >= bounds.x && x <= bounds.x + bounds.width && y >= bounds.y && y <= bounds.y + bounds.height;
+  }
+
+  pointInEllipse(bounds, x, y) {
+    const radiusX = bounds.width / 2;
+    const radiusY = bounds.height / 2;
+    if (radiusX <= 0 || radiusY <= 0) return false;
+    const centerX = bounds.x + radiusX;
+    const centerY = bounds.y + radiusY;
+    return ((x - centerX) / radiusX) ** 2 + ((y - centerY) / radiusY) ** 2 <= 1;
+  }
+
+  cleaningNormalisedPoint(x, y, itemBounds = this.layout.cleaningItemBounds) {
+    if (!itemBounds) return null;
+    return {
+      x: (x - (itemBounds.x + itemBounds.width / 2)) / itemBounds.size,
+      y: (y - (itemBounds.y + itemBounds.height / 2)) / itemBounds.size
+    };
   }
 
   cellAt(x, y) {
@@ -1413,16 +2336,261 @@ window.SceneManager = class SceneManager {
     redraw();
   }
 
+  enterCleaningLab() {
+    this.currentScene = "cleaning";
+    this.pointerAction = null;
+    this.cleaningInventoryChooserOpen = false;
+    this.message = this.allCollectedArtefacts().length
+      ? "Move a dirty pottery sherd or coin into the clean water."
+      : "Collect a find at the dig site to begin cleaning.";
+    this.messageTone = "neutral";
+    redraw();
+  }
+
+  restoreCleaningDrag(action = this.pointerAction) {
+    if (action?.type === "cleaning-item") action.artefact.cleaning.location = action.originLocation;
+  }
+
+  startCleaningItemDrag(artefact, originLocation, x, y) {
+    artefact.cleaning.location = "dragging";
+    this.pointerAction = { type: "cleaning-item", artefact, originLocation, x, y };
+    this.message = originLocation === "inventory"
+      ? "Place the dirty find into the bucket of clean water."
+      : originLocation === "bucket"
+        ? "Place the wet find on the cleaning mat."
+        : "Return the cleaned find to the inventory tray.";
+    this.messageTone = "neutral";
+    redraw();
+  }
+
+  cleaningPointerStart(x, y) {
+    if (this.pointIn(this.layout.labBackButton, x, y)) {
+      this.restoreCleaningDrag();
+      this.pointerAction = null;
+      this.cleaningInventoryChooserOpen = false;
+      this.currentScene = "site";
+      this.message = "Choose a trench or return to the finds lab.";
+      this.messageTone = "neutral";
+      redraw();
+      return;
+    }
+    if (this.cleaningInventoryChooserOpen) {
+      const option = (this.layout.inventoryViewOptions || []).find((entry) => this.pointIn(entry.bounds, x, y));
+      if (option) {
+        this.cleaningInventoryView = option.view;
+        this.cleaningInventoryPage = 0;
+        this.message = `${this.cleaningInventoryViewLabel()} inventory view selected.`;
+        this.messageTone = "neutral";
+      }
+      this.cleaningInventoryChooserOpen = false;
+      redraw();
+      return;
+    }
+    if (this.layout.inventoryViewButton && this.pointIn(this.layout.inventoryViewButton, x, y)) {
+      this.cleaningInventoryChooserOpen = true;
+      redraw();
+      return;
+    }
+    if (this.layout.inventoryPreviousButton && this.pointIn(this.layout.inventoryPreviousButton, x, y)) {
+      this.cleaningInventoryPage = Math.max(0, this.cleaningInventoryPage - 1);
+      redraw();
+      return;
+    }
+    if (this.layout.inventoryNextButton && this.pointIn(this.layout.inventoryNextButton, x, y)) {
+      this.cleaningInventoryPage += 1;
+      redraw();
+      return;
+    }
+    if (this.pointIn(this.layout.toothbrushButton, x, y)) {
+      this.cleaningTool = "toothbrush";
+      this.message = "Toothbrush selected for robust finds.";
+      this.messageTone = "neutral";
+      redraw();
+      return;
+    }
+    if (this.pointIn(this.layout.fineBrushButton, x, y)) {
+      this.cleaningTool = "fine-brush";
+      this.message = "Fine paintbrush selected for fragile or delicate finds.";
+      this.messageTone = "neutral";
+      redraw();
+      return;
+    }
+    if (this.pointIn(this.layout.flipButton, x, y)) {
+      const artefact = this.activeCleaningArtefact();
+      if (artefact && this.cleaningModel.flip(artefact)) {
+        this.message = `${artefact.cleaning.activeFace === "front" ? "Front" : "Back"} face turned upwards.`;
+        this.messageTone = "neutral";
+      } else {
+        this.message = "Place a wet find on the mat before flipping it.";
+        this.messageTone = "warning";
+      }
+      redraw();
+      return;
+    }
+
+    const slot = (this.layout.inventorySlots || []).find((entry) => this.pointIn(entry.bounds, x, y));
+    if (slot) {
+      const artefact = slot.artefact;
+      if (!artefact.cleanable) {
+        this.message = "Cleaning is not yet available for this type of find.";
+        this.messageTone = "warning";
+        redraw();
+        return;
+      }
+      const state = this.cleaningModel.ensureState(artefact);
+      if (["ready-to-identify", "awaiting-specialist"].includes(state.status)) {
+        this.message = state.status === "awaiting-specialist"
+          ? "This coin is waiting for specialist treatment."
+          : "This find is clean and ready for identification.";
+        this.messageTone = "neutral";
+        redraw();
+        return;
+      }
+      const active = this.activeCleaningArtefact();
+      if (active && active !== artefact) {
+        this.message = "Finish or return the find already on the cleaning bench first.";
+        this.messageTone = "warning";
+        redraw();
+        return;
+      }
+      this.startCleaningItemDrag(artefact, "inventory", x, y);
+      return;
+    }
+
+    const item = this.layout.cleaningItemBounds;
+    if (!item || !this.pointIn(item, x, y)) return;
+    const artefact = item.artefact;
+    if (item.location === "bucket") {
+      this.startCleaningItemDrag(artefact, "bucket", x, y);
+      return;
+    }
+    if (item.location !== "mat") return;
+    if (artefact.cleaning.status === "ready-to-return") {
+      this.startCleaningItemDrag(artefact, "mat", x, y);
+      return;
+    }
+    if (!this.cleaningModel.canUseTool(artefact, this.cleaningTool)) {
+      const brushName = artefact.cleaningTool === "toothbrush" ? "toothbrush" : "fine paintbrush";
+      this.message = `${artefact.label} is ${artefact.robustness.toLowerCase()}; use the ${brushName}.`;
+      this.messageTone = "warning";
+      redraw();
+      return;
+    }
+    const point = this.cleaningNormalisedPoint(x, y, item);
+    const contactedSpots = new Set();
+    this.pointerAction = {
+      type: "cleaning-brush",
+      artefact,
+      face: artefact.cleaning.activeFace,
+      tool: this.cleaningTool,
+      lastPoint: point,
+      contactedSpots
+    };
+    const result = this.cleaningModel.clearAlongSegment(
+      artefact,
+      artefact.cleaning.activeFace,
+      point,
+      point,
+      this.cleaningTool,
+      contactedSpots
+    );
+    this.handleCleaningBrushResult(result, item);
+    redraw();
+  }
+
+  cleaningPointerMove(x, y) {
+    const action = this.pointerAction;
+    if (!action) {
+      redraw();
+      return;
+    }
+    if (action.type === "cleaning-item") {
+      action.x = x;
+      action.y = y;
+      redraw();
+      return;
+    }
+    if (action.type !== "cleaning-brush") return;
+    const current = this.cleaningNormalisedPoint(x, y, this.layout.cleaningItemBounds);
+    if (!current) return;
+    const result = this.cleaningModel.clearAlongSegment(
+      action.artefact,
+      action.face,
+      action.lastPoint,
+      current,
+      action.tool,
+      action.contactedSpots
+    );
+    action.lastPoint = current;
+    this.handleCleaningBrushResult(result, this.layout.cleaningItemBounds);
+    redraw();
+  }
+
+  cleaningPointerEnd(x, y) {
+    const action = this.pointerAction;
+    if (!action) {
+      redraw();
+      return;
+    }
+    if (action.type === "cleaning-brush") {
+      this.pointerAction = null;
+      redraw();
+      return;
+    }
+    if (action.type !== "cleaning-item") return;
+    const artefact = action.artefact;
+    let accepted = false;
+    if (action.originLocation === "inventory" && this.pointInEllipse(this.layout.bucketDropTarget || this.layout.bucketWater, x, y)) {
+      accepted = this.cleaningModel.immerse(artefact);
+      if (accepted) this.spawnCleaningWaterEffects();
+      this.message = accepted ? "The find is wet. Move it onto the cleaning mat." : "This find cannot be submerged right now.";
+    } else if (action.originLocation === "bucket" && this.pointIn(this.layout.mat, x, y)) {
+      accepted = this.cleaningModel.placeOnMat(artefact);
+      this.message = accepted
+        ? `Select the ${artefact.cleaningTool === "toothbrush" ? "toothbrush" : "fine paintbrush"} and clean both faces.`
+        : "Wet the find before placing it on the mat.";
+    } else if (action.originLocation === "mat" && this.pointIn(this.layout.inventory, x, y)) {
+      accepted = this.cleaningModel.returnToInventory(artefact);
+      if (accepted) {
+        this.message = artefact.cleaning.status === "awaiting-specialist"
+          ? `${artefact.label} has completed washing and now needs specialist treatment.`
+          : `${artefact.label} is clean and ready for identification.`;
+      }
+    }
+
+    if (!accepted) {
+      artefact.cleaning.location = action.originLocation;
+      this.message = action.originLocation === "inventory"
+        ? "Release the dirty find inside the bucket's water."
+        : action.originLocation === "bucket"
+          ? "Release the wet find on the cleaning mat."
+          : "Release the cleaned find over the inventory tray.";
+      this.messageTone = "warning";
+    } else {
+      this.messageTone = "neutral";
+    }
+    this.pointerAction = null;
+    redraw();
+  }
+
   pointerHover(x, y) {
     this.pointer = { x, y, source: "mouse", pressed: false };
-    if (this.currentScene === "trench") redraw();
+    if (this.currentScene === "trench" || this.currentScene === "cleaning") redraw();
   }
 
   pointerStart(x, y, source = "mouse") {
     this.pointer = { x, y, source, pressed: true };
     if (this.currentScene === "site") {
+      if (this.layout.labButton && this.pointIn(this.layout.labButton, x, y)) {
+        this.enterCleaningLab();
+        return;
+      }
       const tile = this.hitMapTile(x, y);
       if (tile) this.selectTrench(tile.trench);
+      return;
+    }
+    if (this.currentScene === "cleaning") {
+      this.cleaningPointerStart(x, y);
       return;
     }
 
@@ -1451,6 +2619,28 @@ window.SceneManager = class SceneManager {
       this.showDepthDebug = !this.showDepthDebug;
       this.gridCache = null;
       this.message = this.showDepthDebug ? "Depth debug enabled." : "Depth debug hidden.";
+      this.messageTone = "neutral";
+      redraw();
+      return;
+    }
+    if (this.layout.performanceButton && this.pointIn(this.layout.performanceButton, x, y)) {
+      this.performanceMode = this.performanceMode === "full" ? "lite" : "full";
+      this.gridCache = null;
+      this.ambientBuffer = null;
+      this.message = this.performanceMode === "lite"
+        ? "Performance Lite uses simple cells and edge shading."
+        : "Performance Full restores smoothed terrain and curved shadows.";
+      this.messageTone = "neutral";
+      redraw();
+      return;
+    }
+    const disabledTerrainControl = this.performanceMode === "lite" && [
+      this.layout.smoothingButton,
+      this.layout.pillarButton,
+      this.layout.ridgeButton
+    ].some((button) => button && this.pointIn(button, x, y));
+    if (disabledTerrainControl) {
+      this.message = "Switch Performance back to Full to change terrain smoothing options.";
       this.messageTone = "neutral";
       redraw();
       return;
@@ -1524,6 +2714,10 @@ window.SceneManager = class SceneManager {
 
   pointerMove(x, y, source = "mouse") {
     this.pointer = { x, y, source, pressed: true };
+    if (this.currentScene === "cleaning") {
+      this.cleaningPointerMove(x, y);
+      return;
+    }
     if (!this.pointerAction) {
       if (this.currentScene === "trench") redraw();
       return;
@@ -1539,6 +2733,11 @@ window.SceneManager = class SceneManager {
 
   pointerEnd(x, y, source = "mouse") {
     this.pointer = { x, y, source, pressed: false };
+    if (this.currentScene === "cleaning") {
+      this.cleaningPointerEnd(x, y);
+      if (source === "touch") this.pointer = null;
+      return;
+    }
     if (!this.pointerAction) {
       if (source === "touch") this.pointer = null;
       if (this.currentScene === "trench") redraw();

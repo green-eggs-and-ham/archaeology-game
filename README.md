@@ -8,7 +8,7 @@ A lightweight p5.js archaeology game proof of concept, designed to be embedded i
 - `styles.css` — page styling for the embedded game
 - `src/` — game logic split into modules
   - `main.js` — responsive p5 canvas lifecycle and pointer forwarding
-  - `game/` — trench data/model, rendering helpers, and scene management
+  - `game/` — trench and cleaning models, rendering helpers, and scene management
 - `assets/` — image and sound assets
 - `data/` — JSON or other game data files
 
@@ -30,5 +30,8 @@ Then visit `http://localhost:8000`.
 - Each trench has gently varying, mostly continuous sediment bands over unremovable bedrock; the profile only reveals the excavated cross-section and its relative depth levels.
 - The profile key reveals visual layer swatches as they are encountered, and narrow portrait screens use a stacked trench-and-profile layout.
 - Trenches use a 20×20 logical grid with 2×2 artefact footprints; opaque terrain coverage, shared depth boundaries, and low-side shading keep excavation depth readable without rendering gaps.
-- The temporary in-game **Depths** toggle displays the 0–16 excavation depth of each visible cell for terrain debugging.
+- The temporary trench diagnostics include **Depths** plus a **Performance: Full/Lite** switch. Full keeps curved terrain and clipped AO; Lite uses cached rectangular cells and inexpensive cardinal-edge shading for lower-end hardware.
 - Game state lasts until a browser refresh; each map trench keeps its progress while navigating the site map.
+- The **Finds lab** aggregates collected finds from every trench. Dirty pottery and coins are moved through water and onto the cleaning mat, scrubbed on both faces with a safe care-profile tool, then returned to the same inventory. Toothbrushes clean robust finds fastest, while fragile and delicate finds require the fine paintbrush.
+- Cleaning progress is session-only and survives scene changes and resizing. Beads and arrowheads remain visible in the lab but are intentionally unavailable for cleaning in this prototype.
+- Pottery and coin variants use provisional canvas geometry rather than final artwork. Identification, drying, chemical treatment, polishing, and waxing are outside this prototype; the two specialist-treatment coins are marked for later work after washing.

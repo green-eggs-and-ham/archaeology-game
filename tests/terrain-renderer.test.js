@@ -40,6 +40,7 @@ const sandbox = {
   strokeWeight: () => {}
 };
 vm.createContext(sandbox);
+vm.runInContext(fs.readFileSync(path.join(__dirname, "../src/game/CleaningModel.js"), "utf8"), sandbox);
 const sceneManagerSource = fs.readFileSync(path.join(__dirname, "../src/game/SceneManager.js"), "utf8");
 vm.runInContext(sceneManagerSource, sandbox);
 const SceneManager = sandbox.window.SceneManager;
@@ -271,10 +272,10 @@ test("the ridge control toggles direction and invalidates the cached terrain", (
   assert.equal(scene.gridCache, null);
 });
 
-test("all four diagnostic controls share one non-overlapping row", () => {
+test("all five diagnostic controls share one non-overlapping row", () => {
   const scene = manager();
   const buttons = scene.diagnosticButtonLayout(600, 52, 30, 6);
-  const row = [buttons.depth, buttons.smoothing, buttons.pillar, buttons.ridge];
+  const row = [buttons.depth, buttons.performance, buttons.smoothing, buttons.pillar, buttons.ridge];
 
   row.forEach((button) => {
     assert.equal(button.y, 52);
@@ -285,6 +286,68 @@ test("all four diagnostic controls share one non-overlapping row", () => {
   }
   assert.ok(Math.abs(buttons.ridge.x + buttons.ridge.width - 588) < 1e-9);
   assert.ok(buttons.depth.width < buttons.smoothing.width);
+});
+
+test("performance mode participates in caching and Lite locks visual comparison controls", () => {
+  const scene = manager();
+  const testGrid = { x: 10, y: 20, width: 200, height: 200, cellSize: 10 };
+  const testTrench = { id: "performance-cache", visualRevision: 2 };
+  const fullKey = scene.gridCacheKey(testTrench, testGrid);
+  scene.performanceMode = "lite";
+  assert.notEqual(scene.gridCacheKey(testTrench, testGrid), fullKey);
+
+  scene.currentScene = "trench";
+  scene.layout = {
+    mapButton: { x: 0, y: 0, width: 10, height: 10 },
+    brushButton: { x: 12, y: 0, width: 10, height: 10 },
+    scoopButton: { x: 24, y: 0, width: 10, height: 10 },
+    depthButton: { x: 0, y: 12, width: 10, height: 10 },
+    performanceButton: { x: 12, y: 12, width: 20, height: 10 },
+    smoothingButton: { x: 34, y: 12, width: 20, height: 10 },
+    pillarButton: { x: 56, y: 12, width: 20, height: 10 },
+    ridgeButton: { x: 78, y: 12, width: 20, height: 10 }
+  };
+  scene.gridCache = { key: "stale" };
+  scene.ambientBuffer = { stale: true };
+  const originalSmoothing = scene.terrainSmoothingMode;
+  scene.pointerStart(40, 16);
+  assert.equal(scene.terrainSmoothingMode, originalSmoothing);
+  scene.pointerStart(20, 16);
+  assert.equal(scene.performanceMode, "full");
+  assert.equal(scene.gridCache, null);
+  assert.equal(scene.ambientBuffer, null);
+});
+
+test("Lite fields skip pillar merging and component analysis", () => {
+  const scene = manager();
+  let mergeCalls = 0;
+  let componentCalls = 0;
+  scene.pillarRenderMode = "merge";
+  scene.mergeSmallExtrema = () => { mergeCalls += 1; };
+  scene.buildCardinalComponents = () => { componentCalls += 1; return { items: [] }; };
+  const layer = { id: "top", colour: "#886644", pattern: "dots" };
+  const testTrench = {
+    rows: 2,
+    columns: 2,
+    maxDepth: 16,
+    getDepth: () => 0,
+    getSurfaceAt: () => layer
+  };
+  scene.buildVisibleSurfaceField(testTrench, { lightweight: true });
+  assert.equal(mergeCalls, 0);
+  assert.equal(componentCalls, 0);
+});
+
+test("Lite AO uses opaque cardinal strips wholly inside the deeper cell", () => {
+  const scene = manager();
+  const shallow = surface("shallow", 1, "#aa7744");
+  const deep = surface("deep", 5, "#557799");
+  operations.length = 0;
+  scene.drawLiteAmbientOcclusion([[deep, shallow]], trench(1, 2, [deep.layer, shallow.layer]), { x: 0, y: 0, width: 20, height: 10, cellSize: 10 });
+  const fills = operations.filter((operation) => operation[0] === "fillRect");
+  assert.equal(fills.length, 1);
+  assert.ok(fills[0][1] >= 0 && fills[0][1] + fills[0][3] <= 10, "shadow remains in the deeper left cell");
+  assert.match(fills[0][5], /^rgb\(/, "Lite AO is preblended and opaque");
 });
 
 test("scoop clumps use the reduced portrait multiplier for carried and deposited effects", () => {
@@ -421,6 +484,38 @@ test("complete masks retain smoothed owner holes and positive diagonal lobes", (
   assert.equal(ownerRegion.ownerPatches.length, 1);
   assert.equal(ownerRegion.ownerPatches[0].holes.length, 2);
   assert.equal(lobeRegion.positiveLobes.length, 2);
+});
+
+test("Full mode compiles reusable surface paths for terrain and clipping", () => {
+  class FakePath2D {
+    constructor() { this.operations = []; }
+    addPath(path) { this.operations.push(["addPath", path]); }
+    beginPath() {}
+    closePath() { this.operations.push(["closePath"]); }
+    lineTo(...values) { this.operations.push(["lineTo", ...values]); }
+    moveTo(...values) { this.operations.push(["moveTo", ...values]); }
+    quadraticCurveTo(...values) { this.operations.push(["quadraticCurveTo", ...values]); }
+    rect(...values) { this.operations.push(["rect", ...values]); }
+  }
+  sandbox.Path2D = FakePath2D;
+  const scene = manager();
+  const first = surface("first", 2, "#aa7744");
+  const second = surface("second", 2, "#557799");
+  const field = [[first, second], [second, first]];
+  const testTrench = trench(2, 2, [first.layer, second.layer]);
+  const testGrid = { x: 0, y: 0, width: 20, height: 20, cellSize: 10 };
+  const junctions = scene.buildLocalJunctionDescriptors(field, testTrench, testGrid);
+  const regions = scene.collectCompleteSurfaceRegions(field, testTrench, testGrid, junctions);
+  const prepared = scene.prepareSurfaceRegions(regions, testTrench);
+
+  assert.equal(prepared.byDepth.length, 1);
+  assert.ok(prepared.byDepth[0].compiledPath instanceof FakePath2D);
+  regions.forEach((region) => assert.ok(region.compiledPath instanceof FakePath2D));
+  const originalAppend = scene.appendSurfaceRegionPath;
+  scene.appendSurfaceRegionPath = () => { throw new Error("compiled paths should be reused during drawing"); };
+  regions.forEach((region) => scene.drawSurfaceRegion(region));
+  scene.appendSurfaceRegionPath = originalAppend;
+  delete sandbox.Path2D;
 });
 
 test("terrain renders deepest terrain, patterns, and AO before the next shallower depth", () => {
