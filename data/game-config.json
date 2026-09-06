@@ -1,0 +1,9 @@
+{
+  "title": "Archaeology Game",
+  "canvas": { "aspectRatio": "16:9", "compactAspectRatio": "4:3", "portraitAspectRatio": "3:4", "compactBreakpoint": 560, "maxWidth": 960 },
+  "map": { "columns": 3, "rows": 3 },
+  "trench": { "columns": 20, "rows": 20, "maxDepth": 16, "depthResolutionScale": 2, "maxDepthDarkening": 0.16, "artefactFootprintSize": 2, "brushRadius": 1, "brushTravelPerStampCells": 3, "scoopRadius": 3, "scoopPillarExtraDepth": 1, "bedrock": true },
+  "layers": ["Topsoil", "Sandy silt", "Clay", "Gravel"],
+  "artefactTypes": ["Pottery shard", "Glass bead", "Arrowhead", "Coin"],
+  "progress": "session-only"
+}

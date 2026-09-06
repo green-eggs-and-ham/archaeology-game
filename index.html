@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Archaeology Game</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="page-shell">
+      <header class="hero">
+        <h1>Archaeology Game</h1>
+        <p>A portable p5.js starter project designed for easy embedding into a webpage.</p>
+      </header>
+
+      <section class="game-card">
+        <div id="game-shell"></div>
+      </section>
+    </main>
+
+    <script src="https://cdn.jsdelivr.net/npm/p5@2.0.1/lib/p5.min.js"></script>
+    <script src="./data/game-config.js"></script>
+    <script src="./src/game/TrenchModel.js"></script>
+    <script src="./src/game/Renderer.js"></script>
+    <script src="./src/game/SceneManager.js"></script>
+    <script src="./src/main.js"></script>
+  </body>
+</html>
