@@ -32,7 +32,7 @@ window.SceneManager = class SceneManager {
     this.mapTiles = [];
     this.layout = {};
     this.cleaningModel = new window.CleaningModel(config.cleaning || {});
-    this.cleaningTool = "toothbrush";
+    this.cleaningTool = "hand";
     this.cleaningInventoryPage = 0;
     this.cleaningInventoryView = "all";
     this.cleaningInventoryChooserOpen = false;
@@ -177,62 +177,66 @@ window.SceneManager = class SceneManager {
 
     if (isPortrait) {
       const inventoryHeight = Math.max(133, Math.min(164, width * 0.38));
-      const lowerHeight = Math.max(126, Math.min(205, width * 0.38));
+      const bucketHeight = Math.max(69, Math.min(118, width * 0.21));
       const inventoryY = headerHeight;
       const matY = inventoryY + inventoryHeight + gap;
-      const lowerY = height - margin - lowerHeight;
+      const bucketY = height - margin - bucketHeight;
       const lowerWidth = width - margin * 2;
-      const bucketWidth = lowerWidth * 0.42;
       layout.inventory = { x: margin, y: inventoryY, width: lowerWidth, height: inventoryHeight };
-      layout.mat = { x: margin, y: matY, width: lowerWidth, height: Math.max(1, lowerY - matY - gap) };
-      layout.bucket = { x: margin, y: lowerY, width: bucketWidth, height: lowerHeight };
-      layout.controls = { x: margin + bucketWidth + gap, y: lowerY, width: lowerWidth - bucketWidth - gap, height: lowerHeight };
+      layout.mat = { x: margin, y: matY, width: lowerWidth, height: Math.max(1, bucketY - matY - gap) };
+      layout.bucket = { x: margin, y: bucketY, width: lowerWidth, height: bucketHeight };
     } else {
       const contentY = headerHeight;
       const contentHeight = height - contentY - margin;
       const inventoryWidth = Math.max(145, Math.min(215, width * 0.23));
-      const controlsWidth = Math.max(176, Math.min(230, width * 0.24));
       layout.inventory = { x: margin, y: contentY, width: inventoryWidth, height: contentHeight };
-      layout.controls = { x: width - margin - controlsWidth, y: contentY, width: controlsWidth, height: contentHeight };
+      const workspaceX = margin + inventoryWidth + gap;
+      const workspaceWidth = width - workspaceX - margin;
+      const bucketHeight = Math.max(98, Math.min(150, contentHeight * 0.29));
       layout.mat = {
-        x: margin + inventoryWidth + gap,
+        x: workspaceX,
         y: contentY,
-        width: width - margin * 2 - inventoryWidth - controlsWidth - gap * 2,
-        height: contentHeight
+        width: workspaceWidth,
+        height: Math.max(1, contentHeight - bucketHeight - gap)
       };
-      const bucketHeight = Math.max(120, Math.min(180, contentHeight * 0.36));
       layout.bucket = {
-        x: layout.controls.x + 8,
-        y: layout.controls.y + layout.controls.height - bucketHeight - 8,
-        width: layout.controls.width - 16,
+        x: workspaceX,
+        y: layout.mat.y + layout.mat.height + gap,
+        width: workspaceWidth,
         height: bucketHeight
       };
     }
 
-    const controls = layout.controls;
-    if (isPortrait) {
-      const inset = 8;
-      const innerHeight = Math.max(1, controls.height - inset * 2);
-      const buttonGap = Math.max(3, Math.min(5, controls.height * 0.025));
-      const careHeight = Math.max(42, Math.min(58, innerHeight * 0.3));
-      const buttonHeight = Math.max(1, (innerHeight - careHeight - buttonGap * 3) / 3);
-      layout.care = { x: controls.x + inset, y: controls.y + inset, width: controls.width - inset * 2, height: careHeight };
-      layout.toothbrushButton = { x: controls.x + inset, y: layout.care.y + careHeight + buttonGap, width: controls.width - inset * 2, height: buttonHeight };
-      layout.fineBrushButton = { x: controls.x + inset, y: layout.toothbrushButton.y + buttonHeight + buttonGap, width: controls.width - inset * 2, height: buttonHeight };
-      layout.flipButton = { x: controls.x + inset, y: layout.fineBrushButton.y + buttonHeight + buttonGap, width: controls.width - inset * 2, height: buttonHeight };
-    } else {
-      const controlsBottom = layout.bucket.y > controls.y
-        ? layout.bucket.y - 7
-        : controls.y + controls.height;
-      const usableControlsHeight = Math.max(104, controlsBottom - controls.y - 10);
-      const careHeight = Math.max(44, Math.min(92, usableControlsHeight * 0.38));
-      const buttonGap = 5;
-      const buttonHeight = Math.max(25, (usableControlsHeight - careHeight - buttonGap * 4) / 3);
-      layout.care = { x: controls.x + 8, y: controls.y + 8, width: controls.width - 16, height: careHeight };
-      layout.toothbrushButton = { x: controls.x + 8, y: layout.care.y + careHeight + buttonGap, width: controls.width - 16, height: buttonHeight };
-      layout.fineBrushButton = { x: controls.x + 8, y: layout.toothbrushButton.y + buttonHeight + buttonGap, width: controls.width - 16, height: buttonHeight };
-      layout.flipButton = { x: controls.x + 8, y: layout.fineBrushButton.y + buttonHeight + buttonGap, width: controls.width - 16, height: buttonHeight };
-    }
+    const matInset = isPortrait ? 7 : 9;
+    const titleHeight = isPortrait ? 18 : 22;
+    const careHeight = isPortrait ? 14 : 18;
+    const toolbarGap = isPortrait ? 3 : 5;
+    const toolbarHeight = isPortrait ? 28 : 32;
+    const toolbarY = layout.mat.y + matInset + titleHeight + careHeight;
+    const toolbarWidth = layout.mat.width - matInset * 2;
+    const buttonWidth = (toolbarWidth - toolbarGap * 3) / 4;
+    const buttonNames = ["handButton", "toothbrushButton", "fineBrushButton", "flipButton"];
+    buttonNames.forEach((name, index) => {
+      layout[name] = {
+        x: layout.mat.x + matInset + index * (buttonWidth + toolbarGap),
+        y: toolbarY,
+        width: buttonWidth,
+        height: toolbarHeight
+      };
+    });
+    const surfaceY = toolbarY + toolbarHeight + (isPortrait ? 5 : 7);
+    layout.matHeader = {
+      x: layout.mat.x + matInset,
+      y: layout.mat.y + matInset,
+      width: toolbarWidth,
+      height: surfaceY - layout.mat.y - matInset
+    };
+    layout.matSurface = {
+      x: layout.mat.x + matInset,
+      y: surfaceY,
+      width: toolbarWidth,
+      height: Math.max(1, layout.mat.y + layout.mat.height - surfaceY - matInset)
+    };
     return layout;
   }
 
@@ -241,7 +245,6 @@ window.SceneManager = class SceneManager {
     this.drawCleaningHeader();
     this.drawCleaningInventory();
     this.drawCleaningMat();
-    this.drawCleaningControls();
     this.drawCleaningBucket();
     this.drawDraggedCleaningArtefact();
     this.drawCleaningEffects();
@@ -319,7 +322,7 @@ window.SceneManager = class SceneManager {
   }
 
   cleaningInventoryGrid(isPortrait = this.layout.isPortrait) {
-    return isPortrait ? { columns: 3, rows: 1 } : { columns: 2, rows: 4 };
+    return isPortrait ? { columns: 3, rows: 1 } : { columns: 1, rows: 6 };
   }
 
   portraitInventoryLabel(label) {
@@ -436,14 +439,14 @@ window.SceneManager = class SceneManager {
       rect(slot.x, slot.y, slot.width, slot.height, 6);
       const itemSize = portrait
         ? Math.max(13, Math.min(slot.width * 0.28, slot.height * 0.3))
-        : Math.max(15, Math.min(slot.width * 0.38, slot.height * 0.52));
+        : Math.max(24, Math.min(slot.width * 0.27, slot.height * 0.68));
       const portraitLabelLines = portrait ? this.portraitInventoryLabel(artefact.label).split("\n") : [];
       const portraitGroupHeight = itemSize + portraitLabelLines.length * 9.5 + 12;
       const portraitGroupTop = Math.max(2, (slot.height - portraitGroupHeight) / 2);
-      const itemX = slot.x + slot.width / 2;
+      const itemX = portrait ? slot.x + slot.width / 2 : slot.x + 8 + itemSize / 2;
       const itemY = portrait
         ? slot.y + portraitGroupTop + itemSize / 2
-        : slot.y + itemSize * 0.62;
+        : slot.y + slot.height / 2;
       const status = artefact.cleaning?.status;
       this.renderer.artefact(artefact, itemX, itemY, itemSize, {
         face: "front",
@@ -451,25 +454,39 @@ window.SceneManager = class SceneManager {
       });
       fill("#25444a");
       noStroke();
-      textAlign(CENTER, TOP);
+      textAlign(portrait ? CENTER : LEFT, TOP);
       textStyle(BOLD);
-      textSize(portrait ? Math.max(9, Math.min(11, slot.width / 11)) : Math.max(6, Math.min(9, slot.width / 14)));
+      textSize(portrait ? Math.max(9, Math.min(11, slot.width / 11)) : Math.max(10, Math.min(12, slot.width / 16)));
       if (portrait) {
         portraitLabelLines.forEach((labelLine, lineIndex) => {
           text(labelLine, slot.x + slot.width / 2, slot.y + portraitGroupTop + itemSize + 1 + lineIndex * 9.5);
         });
       } else {
+        const textX = slot.x + itemSize + 15;
+        const textWidth = Math.max(1, slot.x + slot.width - textX - 6);
         text(
           artefact.label,
-          slot.x + 3,
-          slot.y + itemSize * 1.08,
-          slot.width - 6,
-          Math.max(10, slot.height - itemSize * 1.04 - 14)
+          textX,
+          slot.y + 7,
+          textWidth,
+          Math.max(18, slot.height - 30)
         );
+        this.layout.inventorySlots[this.layout.inventorySlots.length - 1].thumbnailBounds = {
+          x: itemX - itemSize / 2,
+          y: itemY - itemSize / 2,
+          width: itemSize,
+          height: itemSize
+        };
+        this.layout.inventorySlots[this.layout.inventorySlots.length - 1].nameBounds = {
+          x: textX,
+          y: slot.y + 7,
+          width: textWidth,
+          height: Math.max(18, slot.height - 30)
+        };
       }
       textStyle(NORMAL);
       fill(status === "ready-to-identify" ? "#39734e" : status === "awaiting-specialist" ? "#8d5c20" : "#5b625d");
-      textSize(portrait ? Math.max(8, Math.min(9.5, slot.width / 13)) : Math.max(5.5, Math.min(7.5, slot.width / 16)));
+      textSize(portrait ? Math.max(8, Math.min(9.5, slot.width / 13)) : Math.max(9, Math.min(10, slot.width / 18)));
       if (portrait) {
         text(
           this.inventoryStatusLabel(artefact),
@@ -477,7 +494,15 @@ window.SceneManager = class SceneManager {
           slot.y + portraitGroupTop + itemSize + portraitLabelLines.length * 9.5 + 2
         );
       } else {
-        text(this.inventoryStatusLabel(artefact), slot.x + 2, slot.y + slot.height - 11, slot.width - 4, 10);
+        const textX = slot.x + itemSize + 15;
+        const textWidth = Math.max(1, slot.x + slot.width - textX - 6);
+        text(this.inventoryStatusLabel(artefact), textX, slot.y + slot.height - 18, textWidth, 14);
+        this.layout.inventorySlots[this.layout.inventorySlots.length - 1].statusBounds = {
+          x: textX,
+          y: slot.y + slot.height - 18,
+          width: textWidth,
+          height: 14
+        };
       }
     });
 
@@ -551,7 +576,7 @@ window.SceneManager = class SceneManager {
   }
 
   cleaningItemSize(location = "mat") {
-    const target = location === "bucket" ? this.layout.bucket : this.layout.mat;
+    const target = location === "bucket" ? this.layout.bucket : (this.layout.matSurface || this.layout.mat);
     const multiplier = location === "bucket" ? 0.42 : 0.43;
     return Math.max(34, Math.min(location === "bucket" ? 88 : 170, Math.min(target.width, target.height) * multiplier));
   }
@@ -566,33 +591,57 @@ window.SceneManager = class SceneManager {
     this.layout.cleaningItemBounds = { x: centerX - size * 0.58, y: centerY - size * 0.62, width: size * 1.16, height: size * 1.24, size, location, artefact };
   }
 
+  shouldShowContextFlip(artefact = this.activeCleaningArtefact()) {
+    if (!artefact || artefact.cleaning?.location !== "mat") return false;
+    const currentFace = artefact.cleaning.activeFace;
+    const otherFace = currentFace === "front" ? "back" : "front";
+    return this.cleaningModel.faceComplete(artefact, currentFace)
+      && !this.cleaningModel.faceComplete(artefact, otherFace);
+  }
+
   drawCleaningMat() {
     const bounds = this.layout.mat;
+    const surface = this.layout.matSurface;
     const portrait = this.layout.isPortrait;
     this.renderer.panel(bounds.x, bounds.y, bounds.width, bounds.height, "#d6c9aa");
     fill("#25444a");
     noStroke();
     textAlign(LEFT, TOP);
     textStyle(BOLD);
-    textSize(portrait
-      ? Math.max(12, Math.min(18, bounds.height * 0.075))
-      : Math.max(11, Math.min(16, bounds.height * 0.06)));
-    text("CLEANING MAT", bounds.x + 10, bounds.y + 8);
+    textSize(portrait ? 12 : Math.max(12, Math.min(16, bounds.height * 0.06)));
+    text("CLEANING MAT", this.layout.matHeader.x, this.layout.matHeader.y);
     textStyle(NORMAL);
+    const artefact = this.activeCleaningArtefact();
+    fill("#5b625d");
+    textSize(portrait ? 8.5 : 10);
+    const care = artefact
+      ? portrait
+        ? `${artefact.material} • ${artefact.robustness} • ${artefact.cleaningTool === "toothbrush" ? "Toothbrush fastest" : "Hand/fine brush"}`
+        : `${artefact.material} • ${artefact.robustness} • ${artefact.cleaningTool === "toothbrush" ? "Toothbrush fastest; handwashing and fine brush safe" : "Handwash or use fine paintbrush"}`
+      : "Choose a find, then use Hand to move it through clean water.";
+    text(care, this.layout.matHeader.x, this.layout.matHeader.y + (portrait ? 16 : 20), this.layout.matHeader.width, portrait ? 13 : 16);
+
+    const buttonText = portrait ? { minimumSize: 8, maximumSize: 10 } : { minimumSize: 9, maximumSize: 12 };
+    this.renderer.button(this.layout.handButton, "Hand", this.cleaningTool === "hand", true, false, buttonText);
+    this.renderer.button(this.layout.toothbrushButton, "Toothbrush", this.cleaningTool === "toothbrush", true, false, buttonText);
+    this.renderer.button(this.layout.fineBrushButton, portrait ? "Fine brush" : "Fine paintbrush", this.cleaningTool === "fine-brush", true, false, buttonText);
+    const face = artefact?.cleaning?.activeFace === "back" ? "Back" : "Front";
+    this.renderer.button(this.layout.flipButton, `Flip: ${face}`, false, true, false, buttonText);
+
     fill("#857a65");
-    rect(bounds.x + 10, bounds.y + 32, bounds.width - 20, bounds.height - 44, 12);
+    rect(surface.x, surface.y, surface.width, surface.height, 12);
     stroke(255, 255, 255, 28);
     strokeWeight(1);
     for (let index = 1; index < 5; index += 1) {
-      line(bounds.x + 12, bounds.y + 32 + (bounds.height - 44) * index / 5, bounds.x + bounds.width - 12, bounds.y + 32 + (bounds.height - 44) * index / 5);
+      line(surface.x + 2, surface.y + surface.height * index / 5, surface.x + surface.width - 2, surface.y + surface.height * index / 5);
     }
     noStroke();
     this.layout.cleaningItemBounds = null;
-    const artefact = this.activeCleaningArtefact();
+    this.layout.contextFlipButton = null;
     if (artefact?.cleaning?.location === "mat" && this.pointerAction?.type !== "cleaning-item") {
       const size = this.cleaningItemSize("mat");
-      const centerX = bounds.x + bounds.width / 2;
-      const centerY = bounds.y + bounds.height * 0.52;
+      const centerX = surface.x + surface.width / 2;
+      const centerY = surface.y + surface.height * 0.48;
       this.drawCleaningArtefactAt(artefact, centerX, centerY, size, "mat");
       fill("#efe4c8");
       noStroke();
@@ -600,67 +649,34 @@ window.SceneManager = class SceneManager {
       textSize(portrait ? Math.max(10, Math.min(14, bounds.width * 0.03)) : Math.max(8, Math.min(12, bounds.width * 0.027)));
       const front = Math.round(this.cleaningModel.progress(artefact, "front") * 100);
       const back = Math.round(this.cleaningModel.progress(artefact, "back") * 100);
-      text(`Front ${front}%  •  Back ${back}%`, bounds.x + bounds.width / 2, bounds.y + bounds.height - 12);
+      text(`Front ${front}%  •  Back ${back}%`, surface.x + surface.width / 2, surface.y + surface.height - 7);
+
+      if (this.shouldShowContextFlip(artefact)) {
+        const targetSize = Math.min(
+          Math.max(44, Math.min(52, Math.min(surface.width, surface.height) * 0.24)),
+          surface.width - 12,
+          surface.height - 12
+        );
+        this.layout.contextFlipButton = {
+          x: surface.x + surface.width - targetSize - 6,
+          y: surface.y + 6,
+          width: targetSize,
+          height: targetSize
+        };
+        this.renderer.button(this.layout.contextFlipButton, "↺ ↻", false, true, false, { minimumSize: 15, maximumSize: 20 });
+      }
     } else if (!artefact) {
       fill("#d8cfb6");
       textAlign(CENTER, CENTER);
       textSize(portrait ? Math.max(10, Math.min(14, bounds.width * 0.032)) : Math.max(9, Math.min(13, bounds.width * 0.03)));
-      text("Wet a dirty find, then place it here.", bounds.x + 20, bounds.y + 42, bounds.width - 40, bounds.height - 60);
+      text("Wet a dirty find, then place it here.", surface.x + 12, surface.y, surface.width - 24, surface.height);
     }
-  }
-
-  drawCleaningControls() {
-    const bounds = this.layout.controls;
-    const portrait = this.layout.isPortrait;
-    this.renderer.panel(bounds.x, bounds.y, bounds.width, bounds.height, "#ead9b9");
-    const artefact = this.activeCleaningArtefact();
-    fill("#25444a");
-    noStroke();
-    textAlign(LEFT, TOP);
-    textStyle(BOLD);
-    textSize(portrait ? Math.max(10, Math.min(13, this.layout.care.height * 0.23)) : Math.max(8, Math.min(12, this.layout.care.height * 0.2)));
-    text(
-      artefact ? artefact.label : "CARE CARD",
-      this.layout.care.x,
-      this.layout.care.y + (portrait ? 1 : 0),
-      this.layout.care.width,
-      this.layout.care.height * (portrait ? 0.4 : 0.45)
-    );
-    textStyle(NORMAL);
-    textSize(portrait ? Math.max(9, Math.min(11, this.layout.care.height * 0.19)) : Math.max(6.5, Math.min(10, this.layout.care.height * 0.16)));
-    if (artefact) {
-      const care = artefact.cleaningTool === "toothbrush"
-        ? "Toothbrush fastest; fine brush also safe"
-        : "Use fine paintbrush";
-      text(
-        `${artefact.material}\n${artefact.robustness} • ${care}`,
-        this.layout.care.x,
-        this.layout.care.y + this.layout.care.height * (portrait ? 0.37 : 0.43),
-        this.layout.care.width,
-        this.layout.care.height * (portrait ? 0.63 : 0.57)
-      );
-    } else {
-      text(
-        "Move a collected coin or pottery sherd into the bucket.",
-        this.layout.care.x,
-        this.layout.care.y + this.layout.care.height * (portrait ? 0.34 : 0.38),
-        this.layout.care.width,
-        this.layout.care.height * (portrait ? 0.66 : 0.62)
-      );
-    }
-    const buttonText = portrait ? { minimumSize: 10, maximumSize: 13 } : {};
-    this.renderer.button(this.layout.toothbrushButton, "Toothbrush", this.cleaningTool === "toothbrush", true, false, buttonText);
-    this.renderer.button(this.layout.fineBrushButton, "Fine paintbrush", this.cleaningTool === "fine-brush", true, false, buttonText);
-    const face = artefact?.cleaning?.activeFace === "back" ? "Back" : "Front";
-    this.renderer.button(this.layout.flipButton, `Flip: ${face}`, false, true, false, buttonText);
   }
 
   drawCleaningBucket() {
     const bounds = this.layout.bucket;
     const portrait = this.layout.isPortrait;
-    if (bounds.y !== this.layout.controls.y || bounds.x !== this.layout.controls.x) {
-      this.renderer.panel(bounds.x, bounds.y, bounds.width, bounds.height, "#d9cdb1");
-    }
+    this.renderer.panel(bounds.x, bounds.y, bounds.width, bounds.height, "#d9cdb1");
     fill("#25444a");
     noStroke();
     textAlign(CENTER, TOP);
@@ -668,26 +684,28 @@ window.SceneManager = class SceneManager {
     textSize(portrait ? Math.max(12, Math.min(15, bounds.height * 0.095)) : Math.max(9, Math.min(13, bounds.height * 0.09)));
     text("CLEAN WATER", bounds.x + bounds.width / 2, bounds.y + 7);
     textStyle(NORMAL);
-    const bucketWidth = bounds.width * 0.82;
+    const bucketWidth = Math.min(bounds.width * 0.82, 360);
     const bucketHeight = bounds.height * 0.64;
     const centerX = bounds.x + bounds.width / 2;
     const waterY = bounds.y + bounds.height * 0.38;
     noStroke();
     fill("#6d7b7d");
     rect(centerX - bucketWidth * 0.44, waterY, bucketWidth * 0.88, bucketHeight * 0.72, 0, 0, 12, 12);
-    const canImmerse = this.pointerAction?.type === "cleaning-item" && this.pointerAction.originLocation === "inventory";
+    const canImmerse = this.pointerAction?.type === "cleaning-item"
+      && ["dirty", "wet"].includes(this.pointerAction.artefact.cleaning.status);
     if (canImmerse) {
       noFill();
       stroke(190, 240, 244, 135);
       strokeWeight(Math.max(2, bucketWidth * 0.025));
-      ellipse(centerX, waterY, bucketWidth * 1.08, Math.max(44, bucketHeight * 0.5));
+      ellipse(centerX, waterY, bucketWidth, bucketHeight * 0.34);
       noStroke();
     }
     fill(canImmerse ? "#84cad3" : "#70b7c4");
     ellipse(centerX, waterY, bucketWidth, bucketHeight * 0.34);
     this.layout.bucketWater = { x: centerX - bucketWidth / 2, y: waterY - bucketHeight * 0.17, width: bucketWidth, height: bucketHeight * 0.34 };
+    this.layout.bucketDunkAperture = { ...this.layout.bucketWater };
     const dropWidth = Math.min(bounds.width - 12, bucketWidth * 1.15);
-    const dropHeight = Math.min(bounds.height * 0.48, Math.max(44, bucketHeight * 0.5));
+    const dropHeight = Math.min(bounds.height - 12, Math.max(44, bucketHeight * 0.5));
     this.layout.bucketDropTarget = {
       x: centerX - dropWidth / 2,
       y: waterY - dropHeight / 2,
@@ -715,14 +733,14 @@ window.SceneManager = class SceneManager {
     this.renderer.artefact(artefact, x, y, size, {
       face: artefact.cleaning.activeFace,
       showDirt: !["ready-to-identify", "awaiting-specialist", "ready-to-return"].includes(artefact.cleaning.status),
-      dampened: Boolean(artefact.cleaning.dampened && this.pointerAction.originLocation !== "inventory")
+      dampened: Boolean(artefact.cleaning.dampened)
     });
   }
 
   drawCleaningBrushCursor() {
     const item = this.layout.cleaningItemBounds;
     const artefact = item?.artefact;
-    if (!this.pointer || !artefact || item.location !== "mat" || this.pointerAction?.type === "cleaning-item") return;
+    if (this.cleaningTool === "hand" || !this.pointer || !artefact || item.location !== "mat" || this.pointerAction?.type === "cleaning-item") return;
     if (!this.pointIn(item, this.pointer.x, this.pointer.y)) return;
     const radius = item.size * this.cleaningModel.brushRadii[this.cleaningTool];
     noFill();
@@ -771,6 +789,14 @@ window.SceneManager = class SceneManager {
         startedAt: startedAt + index * 55,
         duration: settings.waterDuration
       });
+    }
+    const dropletLimit = Math.max(settings.waterDroplets, settings.waterDroplets * 4);
+    const rippleLimit = Math.max(settings.waterRipples, settings.waterRipples * 4);
+    if (this.cleaningWaterDrops.length > dropletLimit) {
+      this.cleaningWaterDrops.splice(0, this.cleaningWaterDrops.length - dropletLimit);
+    }
+    if (this.cleaningRipples.length > rippleLimit) {
+      this.cleaningRipples.splice(0, this.cleaningRipples.length - rippleLimit);
     }
     this.scheduleEffectFrame();
   }
@@ -2339,6 +2365,7 @@ window.SceneManager = class SceneManager {
   enterCleaningLab() {
     this.currentScene = "cleaning";
     this.pointerAction = null;
+    this.cleaningTool = "hand";
     this.cleaningInventoryChooserOpen = false;
     this.message = this.allCollectedArtefacts().length
       ? "Move a dirty pottery sherd or coin into the clean water."
@@ -2353,14 +2380,142 @@ window.SceneManager = class SceneManager {
 
   startCleaningItemDrag(artefact, originLocation, x, y) {
     artefact.cleaning.location = "dragging";
-    this.pointerAction = { type: "cleaning-item", artefact, originLocation, x, y };
+    const aperture = this.layout.bucketDunkAperture || this.layout.bucketWater;
+    const apertureCenterY = aperture ? aperture.y + aperture.height / 2 : Infinity;
+    this.pointerAction = {
+      type: "cleaning-item",
+      artefact,
+      originLocation,
+      x,
+      y,
+      lastPoint: { x, y },
+      dunkPhase: aperture && !this.pointInEllipse(aperture, x, y) && y < apertureCenterY ? "armed" : "unarmed"
+    };
     this.message = originLocation === "inventory"
-      ? "Place the dirty find into the bucket of clean water."
+      ? "Hold the find and dunk it through the water, or release it into the bucket."
       : originLocation === "bucket"
-        ? "Place the wet find on the cleaning mat."
-        : "Return the cleaned find to the inventory tray.";
+        ? "Use Hand to dunk the find again or place it on the cleaning mat."
+        : "Use Hand to move the find between the mat, water, and inventory.";
     this.messageTone = "neutral";
     redraw();
+  }
+
+  flipActiveCleaningArtefact() {
+    const artefact = this.activeCleaningArtefact();
+    if (artefact && this.cleaningModel.flip(artefact)) {
+      this.message = `${artefact.cleaning.activeFace === "front" ? "Front" : "Back"} face turned upwards.`;
+      this.messageTone = "neutral";
+      return true;
+    }
+    this.message = "Place a wet find on the mat before flipping it.";
+    this.messageTone = "warning";
+    return false;
+  }
+
+  cleaningDraggedItemBounds(action = this.pointerAction) {
+    if (action?.type !== "cleaning-item") return null;
+    const size = Math.max(42, Math.min(130, this.cleaningItemSize("mat") * 0.8));
+    return {
+      x: action.x - size * 0.58,
+      y: action.y - size * 0.62,
+      width: size * 1.16,
+      height: size * 1.24,
+      size,
+      location: "dragging",
+      artefact: action.artefact
+    };
+  }
+
+  segmentEllipseCrossings(bounds, start, end) {
+    if (!bounds || !start || !end) return [];
+    const radiusX = bounds.width / 2;
+    const radiusY = bounds.height / 2;
+    if (radiusX <= 0 || radiusY <= 0) return [];
+    const centerX = bounds.x + radiusX;
+    const centerY = bounds.y + radiusY;
+    const startX = (start.x - centerX) / radiusX;
+    const startY = (start.y - centerY) / radiusY;
+    const deltaX = (end.x - start.x) / radiusX;
+    const deltaY = (end.y - start.y) / radiusY;
+    const a = deltaX * deltaX + deltaY * deltaY;
+    if (a <= 1e-10) return [];
+    const b = 2 * (startX * deltaX + startY * deltaY);
+    const c = startX * startX + startY * startY - 1;
+    const discriminant = b * b - 4 * a * c;
+    if (discriminant < 0) return [];
+    const root = Math.sqrt(discriminant);
+    const candidates = [(-b - root) / (2 * a), (-b + root) / (2 * a)]
+      .filter((value, index, values) => value > 1e-7 && value <= 1 && (index === 0 || Math.abs(value - values[0]) > 1e-7))
+      .sort((first, second) => first - second);
+    return candidates.map((amount) => {
+      const before = Math.max(0, amount - 1e-5);
+      const after = Math.min(1, amount + 1e-5);
+      const beforePoint = {
+        x: start.x + (end.x - start.x) * before,
+        y: start.y + (end.y - start.y) * before
+      };
+      const afterPoint = {
+        x: start.x + (end.x - start.x) * after,
+        y: start.y + (end.y - start.y) * after
+      };
+      return {
+        amount,
+        x: start.x + (end.x - start.x) * amount,
+        y: start.y + (end.y - start.y) * amount,
+        entering: !this.pointInEllipse(bounds, beforePoint.x, beforePoint.y)
+          && this.pointInEllipse(bounds, afterPoint.x, afterPoint.y)
+      };
+    });
+  }
+
+  handleHandwashResult(result, action) {
+    if (!result) return;
+    if (result.affectedSpots?.length) {
+      this.spawnCleaningDirtParticles(result.affectedSpots, this.cleaningDraggedItemBounds(action));
+    }
+    if (result.complete) {
+      this.message = "Both faces are clean. Return the find to the inventory tray.";
+    } else if (result.faceComplete) {
+      this.message = "This face is clean. Place the find on the mat and flip it.";
+    } else if (result.changed) {
+      this.message = "Keep dunking this face through the water to handwash it.";
+    }
+    if (result.changed) this.messageTone = "neutral";
+  }
+
+  advanceCleaningDunk(action, start, end) {
+    const aperture = this.layout.bucketDunkAperture || this.layout.bucketWater;
+    if (!aperture || action.artefact.cleaning.status === "ready-to-return") return;
+    const centerY = aperture.y + aperture.height / 2;
+    const movingDown = end.y > start.y;
+    const verticalMotion = Math.abs((end.y - start.y) / Math.max(1, aperture.height))
+      >= Math.abs((end.x - start.x) / Math.max(1, aperture.width));
+    const crossings = this.segmentEllipseCrossings(aperture, start, end);
+
+    crossings.forEach((crossing) => {
+      const upperBoundary = crossing.y <= centerY + 1e-5;
+      if (crossing.entering) {
+        if (upperBoundary && movingDown && verticalMotion && action.dunkPhase === "armed") {
+          action.dunkPhase = "immersed";
+          if (this.cleaningModel.dampen(action.artefact)) {
+            this.spawnCleaningWaterEffects();
+            this.message = "The find is wet. Lift it back through the opening to complete a handwash dunk.";
+            this.messageTone = "neutral";
+          }
+        } else {
+          action.dunkPhase = "unarmed";
+        }
+      } else if (action.dunkPhase === "immersed" && upperBoundary && !movingDown && verticalMotion) {
+        action.dunkPhase = "armed";
+        const result = this.cleaningModel.handwashDunk(action.artefact, action.artefact.cleaning.activeFace);
+        this.handleHandwashResult(result, action);
+      } else {
+        action.dunkPhase = "unarmed";
+      }
+    });
+
+    const endsInside = this.pointInEllipse(aperture, end.x, end.y);
+    if (action.dunkPhase !== "immersed" && !endsInside && end.y < centerY) action.dunkPhase = "armed";
   }
 
   cleaningPointerStart(x, y) {
@@ -2401,6 +2556,13 @@ window.SceneManager = class SceneManager {
       redraw();
       return;
     }
+    if (this.layout.handButton && this.pointIn(this.layout.handButton, x, y)) {
+      this.cleaningTool = "hand";
+      this.message = "Hand selected. Move or dunk the artefact without scrubbing it.";
+      this.messageTone = "neutral";
+      redraw();
+      return;
+    }
     if (this.pointIn(this.layout.toothbrushButton, x, y)) {
       this.cleaningTool = "toothbrush";
       this.message = "Toothbrush selected for robust finds.";
@@ -2415,15 +2577,9 @@ window.SceneManager = class SceneManager {
       redraw();
       return;
     }
-    if (this.pointIn(this.layout.flipButton, x, y)) {
-      const artefact = this.activeCleaningArtefact();
-      if (artefact && this.cleaningModel.flip(artefact)) {
-        this.message = `${artefact.cleaning.activeFace === "front" ? "Front" : "Back"} face turned upwards.`;
-        this.messageTone = "neutral";
-      } else {
-        this.message = "Place a wet find on the mat before flipping it.";
-        this.messageTone = "warning";
-      }
+    if (this.pointIn(this.layout.flipButton, x, y)
+      || (this.layout.contextFlipButton && this.pointIn(this.layout.contextFlipButton, x, y))) {
+      this.flipActiveCleaningArtefact();
       redraw();
       return;
     }
@@ -2453,6 +2609,7 @@ window.SceneManager = class SceneManager {
         redraw();
         return;
       }
+      this.cleaningTool = "hand";
       this.startCleaningItemDrag(artefact, "inventory", x, y);
       return;
     }
@@ -2461,11 +2618,17 @@ window.SceneManager = class SceneManager {
     if (!item || !this.pointIn(item, x, y)) return;
     const artefact = item.artefact;
     if (item.location === "bucket") {
+      if (this.cleaningTool !== "hand") {
+        this.message = "Select Hand to lift the find from the bucket.";
+        this.messageTone = "warning";
+        redraw();
+        return;
+      }
       this.startCleaningItemDrag(artefact, "bucket", x, y);
       return;
     }
     if (item.location !== "mat") return;
-    if (artefact.cleaning.status === "ready-to-return") {
+    if (this.cleaningTool === "hand") {
       this.startCleaningItemDrag(artefact, "mat", x, y);
       return;
     }
@@ -2505,8 +2668,11 @@ window.SceneManager = class SceneManager {
       return;
     }
     if (action.type === "cleaning-item") {
+      const previous = action.lastPoint || { x: action.x, y: action.y };
       action.x = x;
       action.y = y;
+      this.advanceCleaningDunk(action, previous, { x, y });
+      action.lastPoint = { x, y };
       redraw();
       return;
     }
@@ -2539,32 +2705,37 @@ window.SceneManager = class SceneManager {
     }
     if (action.type !== "cleaning-item") return;
     const artefact = action.artefact;
+    if (!action.lastPoint || action.lastPoint.x !== x || action.lastPoint.y !== y) {
+      const previous = action.lastPoint || { x: action.x, y: action.y };
+      action.x = x;
+      action.y = y;
+      this.advanceCleaningDunk(action, previous, { x, y });
+      action.lastPoint = { x, y };
+    }
     let accepted = false;
-    if (action.originLocation === "inventory" && this.pointInEllipse(this.layout.bucketDropTarget || this.layout.bucketWater, x, y)) {
-      accepted = this.cleaningModel.immerse(artefact);
-      if (accepted) this.spawnCleaningWaterEffects();
-      this.message = accepted ? "The find is wet. Move it onto the cleaning mat." : "This find cannot be submerged right now.";
-    } else if (action.originLocation === "bucket" && this.pointIn(this.layout.mat, x, y)) {
-      accepted = this.cleaningModel.placeOnMat(artefact);
-      this.message = accepted
-        ? `Select the ${artefact.cleaningTool === "toothbrush" ? "toothbrush" : "fine paintbrush"} and clean both faces.`
-        : "Wet the find before placing it on the mat.";
-    } else if (action.originLocation === "mat" && this.pointIn(this.layout.inventory, x, y)) {
+    if (artefact.cleaning.status === "ready-to-return" && this.pointIn(this.layout.inventory, x, y)) {
       accepted = this.cleaningModel.returnToInventory(artefact);
       if (accepted) {
         this.message = artefact.cleaning.status === "awaiting-specialist"
           ? `${artefact.label} has completed washing and now needs specialist treatment.`
           : `${artefact.label} is clean and ready for identification.`;
       }
+    } else if (["dirty", "wet"].includes(artefact.cleaning.status)
+      && this.pointInEllipse(this.layout.bucketDropTarget || this.layout.bucketWater, x, y)) {
+      accepted = this.cleaningModel.immerse(artefact);
+      if (accepted) this.spawnCleaningWaterEffects();
+      this.message = accepted ? "The find is wet. Move it onto the cleaning mat." : "This find cannot be submerged right now.";
+    } else if (["wet", "ready-to-return"].includes(artefact.cleaning.status)
+      && this.pointIn(this.layout.matSurface || this.layout.mat, x, y)) {
+      accepted = this.cleaningModel.placeOnMat(artefact);
+      this.message = accepted
+        ? "Select Hand, Toothbrush, or Fine paintbrush for the next step."
+        : "Wet the find before placing it on the mat.";
     }
 
     if (!accepted) {
       artefact.cleaning.location = action.originLocation;
-      this.message = action.originLocation === "inventory"
-        ? "Release the dirty find inside the bucket's water."
-        : action.originLocation === "bucket"
-          ? "Release the wet find on the cleaning mat."
-          : "Release the cleaned find over the inventory tray.";
+      this.message = "Release the find over the bucket, cleaning surface, or inventory when it is ready.";
       this.messageTone = "warning";
     } else {
       this.messageTone = "neutral";

@@ -6,6 +6,7 @@
   "cleaning": {
     "dirtSpotsPerFace": 48,
     "completionRatio": 0.9,
+    "handwashPowerPerDunk": 0.125,
     "brushRadii": { "toothbrush": 0.14, "fine-brush": 0.09 },
     "toolPower": { "toothbrush": 1, "fine-brush": 0.5 },
     "effects": {

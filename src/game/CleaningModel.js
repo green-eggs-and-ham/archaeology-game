@@ -2,6 +2,7 @@ window.CleaningModel = class CleaningModel {
   constructor(config = {}) {
     this.dirtSpotsPerFace = config.dirtSpotsPerFace || 48;
     this.completionRatio = config.completionRatio || 0.9;
+    this.handwashPowerPerDunk = config.handwashPowerPerDunk ?? 0.125;
     this.brushRadii = {
       toothbrush: config.brushRadii?.toothbrush || 0.14,
       "fine-brush": config.brushRadii?.["fine-brush"] || 0.09
@@ -93,17 +94,22 @@ window.CleaningModel = class CleaningModel {
   }
 
   immerse(artefact) {
+    if (!this.dampen(artefact)) return false;
+    artefact.cleaning.location = "bucket";
+    return true;
+  }
+
+  dampen(artefact) {
     const state = this.ensureState(artefact);
     if (!state || !["dirty", "wet"].includes(state.status)) return false;
     state.status = "wet";
-    state.location = "bucket";
     state.dampened = true;
     return true;
   }
 
   placeOnMat(artefact) {
     const state = this.ensureState(artefact);
-    if (!state || state.status !== "wet") return false;
+    if (!state || !["wet", "ready-to-return"].includes(state.status)) return false;
     state.location = "mat";
     return true;
   }
@@ -169,6 +175,34 @@ window.CleaningModel = class CleaningModel {
     if (this.allFacesComplete(artefact)) state.status = "ready-to-return";
     return {
       changed,
+      affectedSpots,
+      faceComplete: this.faceComplete(artefact, face),
+      complete: state.status === "ready-to-return"
+    };
+  }
+
+  handwashDunk(artefact, face = artefact?.cleaning?.activeFace || "front") {
+    const state = this.ensureState(artefact);
+    if (!state || state.status !== "wet" || !state.dampened || !["front", "back"].includes(face)) {
+      return { changed: false, reason: "Wet the artefact before handwashing it." };
+    }
+
+    const spots = state.faces[face] || [];
+    const affectedSpots = [];
+    spots.forEach((spot, index) => {
+      if (spot.remaining <= 0) return;
+      const previous = spot.remaining;
+      spot.remaining = Math.max(0, previous - this.handwashPowerPerDunk);
+      const amount = previous - spot.remaining;
+      if (amount > 0) affectedSpots.push({ index, x: spot.x, y: spot.y, amount, remaining: spot.remaining });
+    });
+
+    if (this.progress(artefact, face) >= this.completionRatio) {
+      spots.forEach((spot) => { spot.remaining = 0; });
+    }
+    if (this.allFacesComplete(artefact)) state.status = "ready-to-return";
+    return {
+      changed: affectedSpots.length > 0,
       affectedSpots,
       faceComplete: this.faceComplete(artefact, face),
       complete: state.status === "ready-to-return"

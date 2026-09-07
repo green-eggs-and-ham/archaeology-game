@@ -136,6 +136,39 @@ test("immersion records persistent dampness", () => {
   assert.equal(item.cleaning.dampened, true);
 });
 
+test("eight deliberate handwashing dunks clean one visible face", () => {
+  const model = new CleaningModel(config.cleaning);
+  const item = artefact("decorated-samian", "handwashed");
+  model.ensureState(item);
+  assert.equal(model.dampen(item), true);
+
+  for (let dunk = 0; dunk < 7; dunk += 1) {
+    const result = model.handwashDunk(item, "front");
+    assert.equal(result.changed, true);
+    assert.equal(result.faceComplete, false);
+    assert.equal(result.affectedSpots.length, config.cleaning.dirtSpotsPerFace);
+  }
+  assert.equal(model.progress(item, "front"), 0.875);
+  const final = model.handwashDunk(item, "front");
+  assert.equal(final.faceComplete, true);
+  assert.equal(model.progress(item, "front"), 1);
+  assert.equal(model.progress(item, "back"), 0);
+  assert.equal(item.cleaning.status, "wet");
+});
+
+test("handwashing both faces preserves the specialist return workflow", () => {
+  const model = new CleaningModel(config.cleaning);
+  const item = artefact("victorinus-radiate", "handwashed-specialist");
+  model.ensureState(item);
+  model.dampen(item);
+  for (const face of ["front", "back"]) {
+    for (let dunk = 0; dunk < 8; dunk += 1) model.handwashDunk(item, face);
+  }
+  assert.equal(item.cleaning.status, "ready-to-return");
+  assert.equal(model.returnToInventory(item), true);
+  assert.equal(item.cleaning.status, "awaiting-specialist");
+});
+
 test("beads and arrowheads remain visible inventory finds but cannot enter cleaning state", () => {
   const model = new CleaningModel(config.cleaning);
   for (const id of ["glass-bead", "arrowhead"]) {
@@ -231,7 +264,7 @@ test("inventory views sort by name and filter every requested status group", () 
     assert.deepEqual(Array.from(manager.cleaningInventoryArtefacts()), expected);
   }
   assert.equal(JSON.stringify(manager.cleaningInventoryGrid(true)), JSON.stringify({ columns: 3, rows: 1 }));
-  assert.equal(JSON.stringify(manager.cleaningInventoryGrid(false)), JSON.stringify({ columns: 2, rows: 4 }));
+  assert.equal(JSON.stringify(manager.cleaningInventoryGrid(false)), JSON.stringify({ columns: 1, rows: 6 }));
   assert.equal(manager.portraitInventoryLabel("Verulamium flagon sherd").replace("\n", " "), "Verulamium flagon sherd");
 });
 
@@ -253,7 +286,7 @@ test("choosing an inventory view closes the chooser and resets pagination", () =
   assert.equal(manager.cleaningInventoryChooserOpen, false);
 });
 
-test("portrait care controls stay inside their panel at mobile canvas sizes", () => {
+test("portrait mat controls and bucket stay inside their stacked panels", () => {
   const SceneManager = sandbox.window.SceneManager;
   const manager = Object.create(SceneManager.prototype);
   for (const [canvasWidth, canvasHeight] of [[320, 427], [390, 520], [560, 747]]) {
@@ -262,9 +295,32 @@ test("portrait care controls stay inside their panel at mobile canvas sizes", ()
     const layout = manager.cleaningLayout();
     assert.equal(layout.isPortrait, true);
     assert.ok(layout.mat.height > 0);
-    assert.ok(layout.flipButton.y + layout.flipButton.height <= layout.controls.y + layout.controls.height - 7.9);
-    assert.ok(layout.care.y + layout.care.height < layout.toothbrushButton.y);
+    assert.ok(layout.matSurface.height >= 48);
+    assert.ok(layout.matSurface.y >= layout.flipButton.y + layout.flipButton.height);
+    assert.ok(layout.flipButton.y + layout.flipButton.height <= layout.mat.y + layout.mat.height);
+    assert.ok(layout.bucket.y >= layout.mat.y + layout.mat.height);
+    assert.ok(layout.bucket.y + layout.bucket.height <= canvasHeight - 9.9);
+    const controls = [layout.handButton, layout.toothbrushButton, layout.fineBrushButton, layout.flipButton];
+    controls.forEach((button, index) => {
+      assert.ok(button.x >= layout.mat.x);
+      assert.ok(button.x + button.width <= layout.mat.x + layout.mat.width);
+      if (index) assert.ok(button.x >= controls[index - 1].x + controls[index - 1].width);
+    });
   }
+});
+
+test("landscape uses a readable six-row inventory beside a mat-over-bucket workspace", () => {
+  const SceneManager = sandbox.window.SceneManager;
+  const manager = Object.create(SceneManager.prototype);
+  sandbox.width = 960;
+  sandbox.height = 540;
+  const layout = manager.cleaningLayout();
+  assert.equal(layout.isPortrait, false);
+  assert.deepEqual(JSON.parse(JSON.stringify(manager.cleaningInventoryGrid(false))), { columns: 1, rows: 6 });
+  assert.ok(layout.mat.x >= layout.inventory.x + layout.inventory.width);
+  assert.ok(layout.bucket.y >= layout.mat.y + layout.mat.height);
+  assert.equal(layout.bucket.x, layout.mat.x);
+  assert.equal(layout.bucket.width, layout.mat.width);
 });
 
 test("manual drops enforce inventory to bucket to mat to inventory", () => {
@@ -308,6 +364,54 @@ test("manual drops enforce inventory to bucket to mat to inventory", () => {
   assert.equal(item.cleaning.status, "ready-to-identify");
 });
 
+test("a held wetted find may move directly to the mat and a completed find directly to inventory", () => {
+  const SceneManager = sandbox.window.SceneManager;
+  const manager = Object.create(SceneManager.prototype);
+  const model = new CleaningModel(config.cleaning);
+  const item = artefact("hadrian-denarius", "direct-held-flow");
+  model.ensureState(item);
+  model.dampen(item);
+  manager.cleaningModel = model;
+  manager.layout = {
+    bucketWater: { x: 80, y: 160, width: 40, height: 20 },
+    bucketDropTarget: { x: 70, y: 150, width: 60, height: 44 },
+    mat: { x: 140, y: 30, width: 120, height: 120 },
+    matSurface: { x: 150, y: 50, width: 100, height: 90 },
+    inventory: { x: 0, y: 0, width: 60, height: 160 }
+  };
+  manager.spawnCleaningWaterEffects = () => {};
+
+  item.cleaning.location = "dragging";
+  manager.pointerAction = {
+    type: "cleaning-item",
+    artefact: item,
+    originLocation: "inventory",
+    x: 200,
+    y: 90,
+    lastPoint: { x: 200, y: 90 },
+    dunkPhase: "unarmed"
+  };
+  manager.cleaningPointerEnd(200, 90);
+  assert.equal(item.cleaning.location, "mat");
+
+  for (const face of ["front", "back"]) {
+    for (let dunk = 0; dunk < 8; dunk += 1) model.handwashDunk(item, face);
+  }
+  item.cleaning.location = "dragging";
+  manager.pointerAction = {
+    type: "cleaning-item",
+    artefact: item,
+    originLocation: "mat",
+    x: 30,
+    y: 80,
+    lastPoint: { x: 30, y: 80 },
+    dunkPhase: "unarmed"
+  };
+  manager.cleaningPointerEnd(30, 80);
+  assert.equal(item.cleaning.location, "inventory");
+  assert.equal(item.cleaning.status, "ready-to-identify");
+});
+
 test("the expanded bucket target accepts drops outside the visible water ellipse", () => {
   const SceneManager = sandbox.window.SceneManager;
   const manager = Object.create(SceneManager.prototype);
@@ -327,6 +431,92 @@ test("the expanded bucket target accepts drops outside the visible water ellipse
   assert.equal(item.cleaning.dampened, true);
 });
 
+test("held down-and-up movement through the exact water aperture completes one dunk", () => {
+  const SceneManager = sandbox.window.SceneManager;
+  const manager = Object.create(SceneManager.prototype);
+  const model = new CleaningModel(config.cleaning);
+  const item = artefact("mortarium", "held-dunk");
+  model.ensureState(item);
+  manager.cleaningModel = model;
+  manager.layout = {
+    bucketDunkAperture: { x: 80, y: 80, width: 40, height: 20 },
+    bucketWater: { x: 80, y: 80, width: 40, height: 20 },
+    mat: { x: 0, y: 0, width: 120, height: 120 },
+    matSurface: { x: 0, y: 0, width: 120, height: 120 }
+  };
+  let waterEffects = 0;
+  let dirtEffects = 0;
+  manager.spawnCleaningWaterEffects = () => { waterEffects += 1; };
+  manager.spawnCleaningDirtParticles = (spots) => { dirtEffects += spots.length; };
+  const action = {
+    type: "cleaning-item",
+    artefact: item,
+    originLocation: "inventory",
+    x: 100,
+    y: 70,
+    lastPoint: { x: 100, y: 70 },
+    dunkPhase: "armed"
+  };
+
+  manager.advanceCleaningDunk(action, { x: 100, y: 70 }, { x: 100, y: 90 });
+  assert.equal(action.dunkPhase, "immersed");
+  assert.equal(item.cleaning.dampened, true);
+  assert.equal(model.progress(item, "front"), 0);
+  manager.advanceCleaningDunk(action, { x: 100, y: 90 }, { x: 100, y: 70 });
+  assert.equal(action.dunkPhase, "armed");
+  assert.equal(model.progress(item, "front"), config.cleaning.handwashPowerPerDunk);
+  assert.equal(waterEffects, 1);
+  assert.equal(dirtEffects, config.cleaning.dirtSpotsPerFace);
+});
+
+test("crossing through the lower or side of the aperture cancels handwashing", () => {
+  const SceneManager = sandbox.window.SceneManager;
+  const manager = Object.create(SceneManager.prototype);
+  const model = new CleaningModel(config.cleaning);
+  manager.cleaningModel = model;
+  manager.layout = {
+    bucketDunkAperture: { x: 80, y: 80, width: 40, height: 20 },
+    bucketWater: { x: 80, y: 80, width: 40, height: 20 },
+    mat: { x: 0, y: 0, width: 120, height: 120 },
+    matSurface: { x: 0, y: 0, width: 120, height: 120 }
+  };
+  manager.spawnCleaningWaterEffects = () => {};
+  manager.spawnCleaningDirtParticles = () => {};
+
+  const through = artefact("mortarium", "through-water");
+  model.ensureState(through);
+  const throughAction = { type: "cleaning-item", artefact: through, dunkPhase: "armed", x: 100, y: 70 };
+  manager.advanceCleaningDunk(throughAction, { x: 100, y: 70 }, { x: 100, y: 110 });
+  assert.equal(throughAction.dunkPhase, "unarmed");
+  assert.equal(model.progress(through, "front"), 0);
+
+  const sideways = artefact("mortarium", "side-water");
+  model.ensureState(sideways);
+  const sideAction = { type: "cleaning-item", artefact: sideways, dunkPhase: "armed", x: 100, y: 70 };
+  manager.advanceCleaningDunk(sideAction, { x: 100, y: 70 }, { x: 100, y: 90 });
+  manager.advanceCleaningDunk(sideAction, { x: 100, y: 90 }, { x: 130, y: 85 });
+  assert.notEqual(sideAction.dunkPhase, "immersed");
+  assert.equal(model.progress(sideways, "front"), 0);
+});
+
+test("the contextual flip appears only for a completed visible face", () => {
+  const SceneManager = sandbox.window.SceneManager;
+  const manager = Object.create(SceneManager.prototype);
+  const model = new CleaningModel(config.cleaning);
+  const item = artefact("decorated-samian", "context-flip");
+  model.ensureState(item);
+  model.dampen(item);
+  item.cleaning.location = "mat";
+  manager.cleaningModel = model;
+  manager.activeCleaningArtefact = () => item;
+
+  assert.equal(manager.shouldShowContextFlip(item), false);
+  for (let dunk = 0; dunk < 8; dunk += 1) model.handwashDunk(item, "front");
+  assert.equal(manager.shouldShowContextFlip(item), true);
+  assert.equal(model.flip(item), true);
+  assert.equal(manager.shouldShowContextFlip(item), false);
+});
+
 test("cleaning feedback effects use configured counts and enforce the dirt-particle cap", () => {
   const SceneManager = sandbox.window.SceneManager;
   const manager = Object.create(SceneManager.prototype);
@@ -341,6 +531,9 @@ test("cleaning feedback effects use configured counts and enforce the dirt-parti
   manager.spawnCleaningWaterEffects();
   assert.equal(manager.cleaningWaterDrops.length, config.cleaning.effects.waterDroplets);
   assert.equal(manager.cleaningRipples.length, config.cleaning.effects.waterRipples);
+  for (let index = 0; index < 10; index += 1) manager.spawnCleaningWaterEffects();
+  assert.equal(manager.cleaningWaterDrops.length, config.cleaning.effects.waterDroplets * 4);
+  assert.equal(manager.cleaningRipples.length, config.cleaning.effects.waterRipples * 4);
 
   const spots = Array.from({ length: 48 }, (_, index) => ({
     x: (index % 8) / 10,
