@@ -13,19 +13,35 @@ window.TrenchModel = class TrenchModel {
     this.brushRadius = config.trench.brushRadius;
     this.scoopRadius = config.trench.scoopRadius;
     this.scoopPillarExtraDepth = config.trench.scoopPillarExtraDepth;
+    this.grassCoverage = Math.max(0, Math.min(1, Number(definition.grassCoverage) || 0));
     this.layers = this.createLayers(definition.layerVariant);
     this.bedrock = { ...config.bedrock, id: "bedrock" };
+    this.grassLayer = {
+      id: "grass",
+      name: "Grass",
+      colour: config.trench.grassCover?.colour || "#54733f",
+      pattern: config.trench.grassCover?.pattern || "grass",
+      surfaceCover: true
+    };
     this.depths = Array.from({ length: this.rows }, () => Array(this.columns).fill(0));
     this.stratigraphy = this.createStratigraphy();
+    this.grassMask = this.createGrassMask(this.grassCoverage);
     this.discoveredLayerIds = new Set();
     this.visualRevision = 0;
+    this.terrainRevision = 0;
     this.discoverLayer(this.getSurfaceAt(0, 0));
     this.artefacts = this.createArtefacts();
   }
 
   createLayers(variant) {
     const palette = this.config.layerPalettes[variant % this.config.layerPalettes.length];
-    return this.config.layers.map((layer, index) => ({ ...layer, id: `layer-${index}`, colour: palette[index] }));
+    const weights = this.config.trench.materialClumpWeights || {};
+    return this.config.layers.map((layer, index) => ({
+      ...layer,
+      id: `layer-${index}`,
+      colour: palette[index],
+      clumpWeight: Number(weights[`layer-${index}`]) || 1
+    }));
   }
 
   randomGenerator(salt = 0) {
@@ -63,6 +79,65 @@ window.TrenchModel = class TrenchModel {
         return Math.round(baseDepth + interpolate(upper, lower, verticalAmount) * variation);
       })
     );
+  }
+
+  createSmoothValueField(random, spacing = 4) {
+    const controlColumns = Math.ceil((this.columns - 1) / spacing) + 1;
+    const controlRows = Math.ceil((this.rows - 1) / spacing) + 1;
+    const controls = Array.from({ length: controlRows }, () =>
+      Array.from({ length: controlColumns }, () => random())
+    );
+    const smoothstep = (amount) => amount * amount * (3 - 2 * amount);
+    const interpolate = (start, end, amount) => start + (end - start) * smoothstep(amount);
+    return Array.from({ length: this.rows }, (_, y) =>
+      Array.from({ length: this.columns }, (_, x) => {
+        const controlX = x / spacing;
+        const controlY = y / spacing;
+        const left = Math.floor(controlX);
+        const top = Math.floor(controlY);
+        const right = Math.min(controlColumns - 1, left + 1);
+        const bottom = Math.min(controlRows - 1, top + 1);
+        const upper = interpolate(controls[top][left], controls[top][right], controlX - left);
+        const lower = interpolate(controls[bottom][left], controls[bottom][right], controlX - left);
+        return interpolate(upper, lower, controlY - top);
+      })
+    );
+  }
+
+  createGrassMask(coverage = 0) {
+    const total = this.columns * this.rows;
+    const target = Math.max(0, Math.min(total, Math.round(total * coverage)));
+    const mask = Array.from({ length: this.rows }, () => Array(this.columns).fill(false));
+    if (!target) return mask;
+    if (target === total) return mask.map((row) => row.map(() => true));
+
+    const scores = this.createSmoothValueField(this.randomGenerator(0x47A55), 4);
+    let start = { x: 0, y: 0, score: -Infinity };
+    for (let y = 0; y < this.rows; y += 1) {
+      for (let x = 0; x < this.columns; x += 1) {
+        if (scores[y][x] > start.score) start = { x, y, score: scores[y][x] };
+      }
+    }
+
+    const selected = new Set();
+    const frontier = new Map();
+    const key = (x, y) => `${x}:${y}`;
+    const addFrontier = (x, y) => {
+      if (!this.isInside(x, y) || selected.has(key(x, y)) || frontier.has(key(x, y))) return;
+      frontier.set(key(x, y), { x, y, score: scores[y][x] });
+    };
+    addFrontier(start.x, start.y);
+    const directions = [[1, 0], [0, 1], [-1, 0], [0, -1]];
+    while (selected.size < target && frontier.size) {
+      const next = [...frontier.values()].sort((first, second) =>
+        second.score - first.score || first.y - second.y || first.x - second.x
+      )[0];
+      frontier.delete(key(next.x, next.y));
+      selected.add(key(next.x, next.y));
+      mask[next.y][next.x] = true;
+      directions.forEach(([dx, dy]) => addFrontier(next.x + dx, next.y + dy));
+    }
+    return mask;
   }
 
   createStratigraphy() {
@@ -229,6 +304,11 @@ window.TrenchModel = class TrenchModel {
     return this.getStratumAt(x, y, this.getDepth(x, y));
   }
 
+  getRenderableSurfaceAt(x, y) {
+    if (this.getDepth(x, y) === 0 && this.grassMask?.[y]?.[x]) return this.grassLayer;
+    return this.getSurfaceAt(x, y);
+  }
+
   getSurfaceSignature(x, y) {
     const layer = this.getSurfaceAt(x, y);
     return `${this.getDepth(x, y)}:${layer.id}`;
@@ -257,8 +337,21 @@ window.TrenchModel = class TrenchModel {
   refreshArtefactExposures() {
     this.artefacts.forEach((artefact) => {
       if (artefact.exposure === "collected") return;
-      if (artefact.footprint.every((cell) => this.getDepth(cell.x, cell.y) > artefact.depth)) artefact.exposure = "revealed";
+      const depths = artefact.footprint.map((cell) => this.getDepth(cell.x, cell.y));
+      if (depths.every((depth) => depth > artefact.depth)) artefact.exposure = "revealed";
+      else if (depths.some((depth) => depth >= artefact.depth)) artefact.exposure = "partial";
     });
+  }
+
+  artefactVisibleQuadrants(artefact) {
+    if (!artefact) return [];
+    if (["revealed", "collected"].includes(artefact.exposure)) return artefact.footprint.map((_, index) => index);
+    const visible = artefact.footprint
+      .map((cell, index) => (this.getDepth(cell.x, cell.y) >= artefact.depth ? index : -1))
+      .filter((index) => index >= 0);
+    if (visible.length || artefact.exposure !== "partial") return visible;
+    const fallback = [...String(artefact.id || "find")].reduce((total, character) => total + character.charCodeAt(0), 0);
+    return [fallback % Math.max(1, artefact.footprint.length)];
   }
 
   artefactIsRevealed(artefact) {
@@ -308,6 +401,7 @@ window.TrenchModel = class TrenchModel {
     changedCells.forEach((cell) => { this.depths[cell.y][cell.x] += 1; });
     this.registerVisibleSurfaces(changedCells);
     this.refreshArtefactExposures();
+    this.terrainRevision += 1;
     this.bumpVisualRevision();
     return { changed: true, cells: changedCells, removedLayers };
   }
@@ -394,8 +488,13 @@ window.TrenchModel = class TrenchModel {
     if (!plan.steps.length) return { allowed: false, reason: "Bedrock has been reached here.", plan };
     const protectedArtefact = this.protectedArtefactForSteps(plan.steps);
     if (protectedArtefact) return { allowed: false, reason: "A find is emerging here, use the brush to carefully expose it.", artefact: protectedArtefact };
-    const soilColours = plan.steps.map((step) => this.getStratumAtAbsoluteDepth(step.x, step.y, step.fromDepth).colour);
-    return { allowed: true, cells: plan.cells, steps: plan.steps, soilColours, plan };
+    const removedMaterials = plan.steps.map((step) => this.getStratumAtAbsoluteDepth(step.x, step.y, step.fromDepth));
+    const soilColours = removedMaterials.map((layer) => layer.colour);
+    const materialIds = removedMaterials.map((layer) => layer.id);
+    const clumpWeight = removedMaterials.length
+      ? removedMaterials.reduce((total, layer) => total + (Number(layer.clumpWeight) || 1), 0) / removedMaterials.length
+      : 1;
+    return { allowed: true, cells: plan.cells, steps: plan.steps, soilColours, materialIds, clumpWeight, plan };
   }
 
   partiallyExpose(artefact) {
@@ -413,8 +512,17 @@ window.TrenchModel = class TrenchModel {
       this.discoverLayer(this.getStratumAtAbsoluteDepth(step.x, step.y, step.toDepth));
     });
     this.refreshArtefactExposures();
+    this.terrainRevision += 1;
     this.bumpVisualRevision();
-    return { allowed: true, cells: result.cells, steps: result.steps, soilColours: result.soilColours, reason: "Soil set aside." };
+    return {
+      allowed: true,
+      cells: result.cells,
+      steps: result.steps,
+      soilColours: result.soilColours,
+      materialIds: result.materialIds,
+      clumpWeight: result.clumpWeight,
+      reason: "Soil set aside."
+    };
   }
 
   collectAt(x, y) {

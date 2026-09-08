@@ -16,18 +16,18 @@ body {
 }
 
 .page-shell {
-  max-width: 1100px;
+  max-width: 1340px;
   margin: 0 auto;
-  padding: 2rem 1.25rem 3rem;
+  padding: 1rem 1rem 1.5rem;
 }
 
 .hero {
-  margin-bottom: 1.5rem;
+  margin-bottom: 0.75rem;
 }
 
 .hero h1 {
-  margin: 0 0 0.5rem;
-  font-size: clamp(2rem, 4vw, 2.8rem);
+  margin: 0 0 0.25rem;
+  font-size: clamp(1.55rem, 3vw, 2.35rem);
 }
 
 .hero p {
@@ -41,35 +41,140 @@ body {
   background: rgba(15, 23, 42, 0.9);
   border: 1px solid rgba(148, 163, 184, 0.25);
   border-radius: 24px;
-  padding: 1rem;
+  padding: 0.7rem;
   box-shadow: 0 20px 60px rgba(2, 6, 23, 0.35);
 }
 
 #game-shell {
+  position: relative;
   display: flex;
   justify-content: center;
   align-items: center;
   width: 100%;
+  max-width: min(1280px, calc((100vh - 8rem) * 1.7778));
+  aspect-ratio: 16 / 9;
+  min-height: 180px;
+  margin: 0 auto;
+  overflow: hidden;
+  border-radius: 16px;
+  background: #102a34;
   touch-action: none;
 }
 
 canvas {
   display: block;
-  max-width: 100%;
-  height: auto;
+  width: 100% !important;
+  height: 100% !important;
   border-radius: 16px;
   touch-action: none;
   user-select: none;
   -webkit-user-select: none;
+  opacity: 0;
+  transition: opacity 180ms ease;
 }
 
-@media (max-width: 560px) {
+#game-shell.is-ready canvas {
+  position: absolute;
+  inset: 0;
+  opacity: 1;
+  cursor: none;
+  touch-action: none;
+}
+
+#game-shell.is-ready,
+#game-shell.is-ready * {
+  cursor: none;
+}
+
+.game-loader {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: 0.7rem;
+  padding: 1.25rem;
+  color: #eaf2df;
+  background: linear-gradient(180deg, #14333d, #0b202a);
+  transition: opacity 180ms ease, visibility 180ms ease;
+}
+
+#game-shell.is-ready .game-loader {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.game-loader[hidden],
+#game-shell.is-ready #p5_loading,
+body > #p5_loading {
+  display: none !important;
+}
+
+#game-shell.has-load-error .game-loader {
+  color: #ffd889;
+}
+
+.game-loader p {
+  margin: 0;
+  font-size: clamp(0.8rem, 1.8vw, 1rem);
+}
+
+.canvas-skeleton {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(42px, 86px));
+  gap: 0.55rem;
+  width: min(70%, 340px);
+}
+
+.canvas-skeleton span {
+  height: clamp(42px, 7vw, 68px);
+  border: 1px solid rgba(216, 233, 218, 0.18);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.06);
+  animation: skeleton-pulse 1.2s ease-in-out infinite alternate;
+}
+
+.canvas-skeleton span:nth-child(2) {
+  animation-delay: 120ms;
+}
+
+.canvas-skeleton span:nth-child(3) {
+  animation-delay: 240ms;
+}
+
+.loading-track {
+  width: min(72%, 420px);
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.loading-track span {
+  display: block;
+  width: 100%;
+  height: 100%;
+  transform: scaleX(0.04);
+  transform-origin: left center;
+  border-radius: inherit;
+  background: #f4b942;
+  transition: transform 160ms ease;
+}
+
+@keyframes skeleton-pulse {
+  from { opacity: 0.5; }
+  to { opacity: 1; }
+}
+
+@media (max-width: 640px) {
   .page-shell {
-    padding: 1rem 0.6rem 1.5rem;
+    padding: 0.65rem 0.4rem 1rem;
   }
 
   .hero {
-    margin-bottom: 1rem;
+    margin-bottom: 0.55rem;
   }
 
   .game-card {
@@ -79,5 +184,35 @@ canvas {
 
   canvas {
     border-radius: 12px;
+  }
+
+  #game-shell {
+    border-radius: 12px;
+  }
+}
+
+@media (max-width: 640px) and (orientation: landscape) {
+  #game-shell {
+    max-width: min(100%, calc((100vh - 5.5rem) * 1.3333));
+    aspect-ratio: 4 / 3;
+  }
+}
+
+@media (max-width: 640px) and (orientation: portrait) {
+  #game-shell {
+    max-width: min(100%, calc((100vh - 6.5rem) * 0.75));
+    aspect-ratio: 3 / 4;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .canvas-skeleton span {
+    animation: none;
+  }
+
+  canvas,
+  .game-loader,
+  .loading-track span {
+    transition: none;
   }
 }

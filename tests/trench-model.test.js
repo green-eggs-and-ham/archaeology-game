@@ -172,6 +172,59 @@ test("brush strokes level the highest cells before digging a flat area deeper", 
   assert.ok(footprint.every((cell) => trench.getDepth(cell.x, cell.y) === 2));
 });
 
+test("terrain revisions advance only for successful depth mutations", () => {
+  const trench = model();
+  assert.equal(trench.terrainRevision, 0);
+  assert.equal(trench.visualRevision, 0);
+
+  const brushed = trench.brushAt(10, 10);
+  assert.equal(brushed.changed, true);
+  assert.equal(trench.terrainRevision, 1);
+  assert.equal(trench.visualRevision, 1);
+
+  const artefact = {
+    id: "revision-find",
+    depth: 0,
+    exposure: "hidden",
+    footprint: [{ x: 0, y: 0 }]
+  };
+  trench.artefacts = [artefact];
+  trench.partiallyExpose(artefact);
+  assert.equal(trench.terrainRevision, 1, "partial exposure changes overlays, not terrain");
+  assert.equal(trench.visualRevision, 2);
+
+  artefact.exposure = "revealed";
+  assert.equal(trench.collectAt(0, 0), artefact);
+  assert.equal(trench.terrainRevision, 1, "collection changes overlays, not terrain");
+  assert.equal(trench.visualRevision, 3);
+
+  const shovelled = trench.scoop(15, 15);
+  assert.equal(shovelled.allowed, true);
+  assert.equal(trench.terrainRevision, 2);
+  assert.equal(trench.visualRevision, 4);
+});
+
+test("blocked excavation does not advance either revision", () => {
+  const brushedTrench = model();
+  brushedTrench.brushCells(10, 10).forEach((cell) => {
+    brushedTrench.depths[cell.y][cell.x] = brushedTrench.maxDepth;
+  });
+  assert.equal(brushedTrench.brushAt(10, 10).changed, false);
+  assert.equal(brushedTrench.terrainRevision, 0);
+  assert.equal(brushedTrench.visualRevision, 0);
+
+  const shovelledTrench = model();
+  shovelledTrench.artefacts = [{
+    id: "protected-revision-find",
+    depth: 0,
+    exposure: "hidden",
+    footprint: [{ x: 10, y: 10 }]
+  }];
+  assert.equal(shovelledTrench.scoop(10, 10).allowed, false);
+  assert.equal(shovelledTrench.terrainRevision, 0);
+  assert.equal(shovelledTrench.visualRevision, 0);
+});
+
 test("a flat scoop removes one complete circular level at standard throughput", () => {
   const trench = model();
   const plan = trench.buildScoopPlan(10, 10);
@@ -257,4 +310,103 @@ test("artefact contact in the primary scoop pass also rejects the complete plan"
   assert.equal(result.allowed, false);
   assert.equal(result.artefact.id, "surface-find");
   assert.equal(JSON.stringify(trench.depths), before);
+});
+
+test("grass cover uses deterministic exact coverage and remains one connected patch", () => {
+  const expectedCounts = new Map([[0, 0], [0.5, 200], [1, 400]]);
+  for (const coverage of [0, 0.5, 1]) {
+    const definition = { id: `grass-${coverage}`, seed: 719, label: "Grass", layerVariant: 0, grassCoverage: coverage };
+    const first = new TrenchModel(definition, configFor());
+    const second = new TrenchModel(definition, configFor());
+    const covered = [];
+    first.grassMask.forEach((row, y) => row.forEach((value, x) => {
+      if (value) covered.push({ x, y });
+    }));
+    assert.equal(covered.length, expectedCounts.get(coverage));
+    assert.equal(JSON.stringify(first.grassMask), JSON.stringify(second.grassMask));
+
+    if (covered.length) {
+      const queued = [covered[0]];
+      const visited = new Set([`${covered[0].x}:${covered[0].y}`]);
+      while (queued.length) {
+        const current = queued.shift();
+        [[1, 0], [0, 1], [-1, 0], [0, -1]].forEach(([dx, dy]) => {
+          const x = current.x + dx;
+          const y = current.y + dy;
+          const key = `${x}:${y}`;
+          if (!first.grassMask[y]?.[x] || visited.has(key)) return;
+          visited.add(key);
+          queued.push({ x, y });
+        });
+      }
+      assert.equal(visited.size, covered.length);
+    }
+  }
+});
+
+test("grass is render-only and disappears after the first excavation increment", () => {
+  const trench = new TrenchModel(
+    { id: "turf", seed: 173, label: "Turf", layerVariant: 0, grassCoverage: 1 },
+    configFor()
+  );
+  trench.artefacts = [];
+  const geologicalSurface = trench.getSurfaceAt(10, 10);
+  assert.equal(geologicalSurface.id, "layer-0");
+  assert.equal(trench.getRenderableSurfaceAt(10, 10).id, "grass");
+  trench.depths[10][10] = 1;
+  assert.equal(trench.getRenderableSurfaceAt(10, 10).id, trench.getSurfaceAt(10, 10).id);
+  assert.equal(trench.maxDepth, 16, "the cover does not add an excavation level");
+});
+
+test("emerging artefacts expose their matching footprint quadrants before full reveal", () => {
+  const trench = model();
+  const footprint = trench.createFootprint(6, 7, 2);
+  const artefact = { id: "quadrants", depth: 4, exposure: "hidden", footprint };
+  trench.artefacts = [artefact];
+  footprint.forEach((cell) => { trench.depths[cell.y][cell.x] = 3; });
+
+  const combinations = [[0], [1, 2], [0, 1, 2], [0, 1, 2, 3]];
+  combinations.forEach((visible) => {
+    footprint.forEach((cell, index) => { trench.depths[cell.y][cell.x] = visible.includes(index) ? 4 : 3; });
+    artefact.exposure = "hidden";
+    trench.refreshArtefactExposures();
+    assert.deepEqual(Array.from(trench.artefactVisibleQuadrants(artefact)), visible);
+    assert.equal(artefact.exposure, "partial");
+  });
+
+  footprint.forEach((cell) => { trench.depths[cell.y][cell.x] = 5; });
+  trench.refreshArtefactExposures();
+  assert.equal(artefact.exposure, "revealed");
+  assert.deepEqual(Array.from(trench.artefactVisibleQuadrants(artefact)), [0, 1, 2, 3]);
+});
+
+test("legacy partial artefacts receive one deterministic visible quadrant", () => {
+  const trench = model();
+  const artefact = { id: "legacy-partial", depth: 8, exposure: "partial", footprint: trench.createFootprint(4, 4, 2) };
+  artefact.footprint.forEach((cell) => { trench.depths[cell.y][cell.x] = 0; });
+  const first = Array.from(trench.artefactVisibleQuadrants(artefact));
+  assert.equal(first.length, 1);
+  assert.deepEqual(first, Array.from(trench.artefactVisibleQuadrants(artefact)));
+});
+
+test("shovel plans report removed materials and their average clump weight", () => {
+  const settings = configFor();
+  settings.trench.materialClumpWeights = {
+    "layer-0": 0.8,
+    "layer-1": 1,
+    "layer-2": 1.35,
+    "layer-3": 1.6
+  };
+  const trench = new TrenchModel({ id: "weighted", seed: 173, label: "Weighted", layerVariant: 0 }, settings);
+  trench.artefacts = [];
+  trench.scoopCells(10, 10).forEach((cell, index) => {
+    trench.depths[cell.y][cell.x] = index % 2 ? 0 : 8;
+  });
+
+  const check = trench.canScoop(10, 10);
+  assert.equal(check.allowed, true);
+  assert.equal(check.materialIds.length, check.steps.length);
+  const weights = new Map(trench.layers.map((layer) => [layer.id, layer.clumpWeight]));
+  const expected = check.materialIds.reduce((sum, id) => sum + weights.get(id), 0) / check.materialIds.length;
+  assert.ok(Math.abs(check.clumpWeight - expected) < 1e-12);
 });

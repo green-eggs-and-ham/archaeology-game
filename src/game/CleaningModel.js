@@ -3,6 +3,7 @@ window.CleaningModel = class CleaningModel {
     this.dirtSpotsPerFace = config.dirtSpotsPerFace || 48;
     this.completionRatio = config.completionRatio || 0.9;
     this.handwashPowerPerDunk = config.handwashPowerPerDunk ?? 0.125;
+    this.handwashReversePowerRatio = config.handwashReversePowerRatio ?? 0.75;
     this.brushRadii = {
       toothbrush: config.brushRadii?.toothbrush || 0.14,
       "fine-brush": config.brushRadii?.["fine-brush"] || 0.09
@@ -187,24 +188,32 @@ window.CleaningModel = class CleaningModel {
       return { changed: false, reason: "Wet the artefact before handwashing it." };
     }
 
-    const spots = state.faces[face] || [];
+    const reverseFace = face === "front" ? "back" : "front";
     const affectedSpots = [];
-    spots.forEach((spot, index) => {
-      if (spot.remaining <= 0) return;
-      const previous = spot.remaining;
-      spot.remaining = Math.max(0, previous - this.handwashPowerPerDunk);
-      const amount = previous - spot.remaining;
-      if (amount > 0) affectedSpots.push({ index, x: spot.x, y: spot.y, amount, remaining: spot.remaining });
-    });
+    const applyPower = (targetFace, power) => {
+      const spots = state.faces[targetFace] || [];
+      spots.forEach((spot, index) => {
+        if (spot.remaining <= 0) return;
+        const previous = spot.remaining;
+        spot.remaining = Math.max(0, previous - power);
+        const amount = previous - spot.remaining;
+        if (amount > 0) {
+          affectedSpots.push({ index, face: targetFace, x: spot.x, y: spot.y, amount, remaining: spot.remaining });
+        }
+      });
+      if (this.progress(artefact, targetFace) >= this.completionRatio) {
+        spots.forEach((spot) => { spot.remaining = 0; });
+      }
+    };
 
-    if (this.progress(artefact, face) >= this.completionRatio) {
-      spots.forEach((spot) => { spot.remaining = 0; });
-    }
+    applyPower(face, this.handwashPowerPerDunk);
+    applyPower(reverseFace, this.handwashPowerPerDunk * this.handwashReversePowerRatio);
     if (this.allFacesComplete(artefact)) state.status = "ready-to-return";
     return {
       changed: affectedSpots.length > 0,
       affectedSpots,
       faceComplete: this.faceComplete(artefact, face),
+      reverseFaceComplete: this.faceComplete(artefact, reverseFace),
       complete: state.status === "ready-to-return"
     };
   }

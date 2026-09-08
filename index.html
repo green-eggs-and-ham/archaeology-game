@@ -5,6 +5,62 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Archaeology Game</title>
     <link rel="stylesheet" href="./styles.css" />
+    <script>
+      window.GameBoot = {
+        total: 9,
+        complete: 0,
+        failed: false,
+        addResources(count = 1) {
+          this.total += Math.max(0, count);
+          this.render();
+        },
+        resourceLoaded() {
+          this.complete += 1;
+          this.render();
+        },
+        resourceFailed(label = "A required resource") {
+          this.failed = true;
+          const status = document.getElementById("game-loading-status");
+          const shell = document.getElementById("game-shell");
+          if (status) status.textContent = `${label} failed to load. Check the connection and reload.`;
+          if (shell) shell.classList.add("has-load-error");
+        },
+        render() {
+          const progress = document.getElementById("game-loading-progress");
+          const status = document.getElementById("game-loading-status");
+          const amount = Math.max(0.04, Math.min(1, this.complete / Math.max(1, this.total)));
+          if (progress) progress.style.transform = `scaleX(${amount})`;
+          if (status && !this.failed) status.textContent = `Preparing dig site… ${Math.round(amount * 100)}%`;
+        },
+        markReady() {
+          if (this.failed) return;
+          this.complete = Math.max(this.complete, this.total);
+          this.render();
+          const shell = document.getElementById("game-shell");
+          const loader = shell?.querySelector(".game-loader");
+          if (shell) {
+            shell.classList.remove("is-loading");
+            shell.classList.add("is-ready");
+            shell.setAttribute("aria-busy", "false");
+          }
+          if (loader) {
+            loader.hidden = true;
+            loader.setAttribute("aria-hidden", "true");
+            loader.remove();
+          }
+          document.querySelectorAll("#p5_loading").forEach((fallback) => fallback.remove());
+        }
+      };
+      window.addEventListener("error", (event) => {
+        const shell = document.getElementById("game-shell");
+        if (shell?.classList.contains("is-ready") || event.target instanceof HTMLScriptElement) return;
+        window.GameBoot.resourceFailed("Game startup");
+      });
+      window.addEventListener("unhandledrejection", () => {
+        const shell = document.getElementById("game-shell");
+        if (!shell?.classList.contains("is-ready")) window.GameBoot.resourceFailed("Game startup");
+      });
+    </script>
   </head>
   <body>
     <main class="page-shell">
@@ -14,16 +70,28 @@
       </header>
 
       <section class="game-card">
-        <div id="game-shell"></div>
+        <div id="game-shell" class="is-loading" aria-busy="true">
+          <div class="game-loader" role="status" aria-live="polite">
+            <div class="canvas-skeleton" aria-hidden="true">
+              <span></span><span></span><span></span>
+            </div>
+            <p id="game-loading-status">Preparing dig site… 4%</p>
+            <div class="loading-track" aria-hidden="true">
+              <span id="game-loading-progress"></span>
+            </div>
+          </div>
+        </div>
       </section>
     </main>
 
-    <script src="https://cdn.jsdelivr.net/npm/p5@2.0.1/lib/p5.min.js"></script>
-    <script src="./data/game-config.js"></script>
-    <script src="./src/game/CleaningModel.js"></script>
-    <script src="./src/game/TrenchModel.js"></script>
-    <script src="./src/game/Renderer.js"></script>
-    <script src="./src/game/SceneManager.js"></script>
-    <script src="./src/main.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/p5@2.0.1/lib/p5.min.js" onload="GameBoot.resourceLoaded()" onerror="GameBoot.resourceFailed('The drawing library')"></script>
+    <script defer src="./data/game-config.js" onload="GameBoot.resourceLoaded()" onerror="GameBoot.resourceFailed('Game configuration')"></script>
+    <script defer src="./src/utils/assetLoader.js" onload="GameBoot.resourceLoaded()" onerror="GameBoot.resourceFailed('The asset loader')"></script>
+    <script defer src="./src/game/CleaningModel.js" onload="GameBoot.resourceLoaded()" onerror="GameBoot.resourceFailed('Cleaning rules')"></script>
+    <script defer src="./src/game/TrenchModel.js" onload="GameBoot.resourceLoaded()" onerror="GameBoot.resourceFailed('Trench rules')"></script>
+    <script defer src="./src/game/Renderer.js" onload="GameBoot.resourceLoaded()" onerror="GameBoot.resourceFailed('The renderer')"></script>
+    <script defer src="./src/game/TerrainGraphics.js" onload="GameBoot.resourceLoaded()" onerror="GameBoot.resourceFailed('Terrain graphics')"></script>
+    <script defer src="./src/game/SceneManager.js" onload="GameBoot.resourceLoaded()" onerror="GameBoot.resourceFailed('Scene controls')"></script>
+    <script defer src="./src/main.js" onload="GameBoot.resourceLoaded()" onerror="GameBoot.resourceFailed('Game startup')"></script>
   </body>
 </html>

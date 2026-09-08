@@ -1,12 +1,39 @@
 {
   "title": "Archaeology Game",
-  "canvas": { "aspectRatio": "16:9", "compactAspectRatio": "4:3", "portraitAspectRatio": "3:4", "compactBreakpoint": 560, "maxWidth": 960 },
+  "canvas": { "aspectRatio": "16:9", "compactAspectRatio": "4:3", "portraitAspectRatio": "3:4", "compactBreakpoint": 640, "maxWidth": 1280 },
   "map": { "columns": 3, "rows": 3 },
-  "trench": { "columns": 20, "rows": 20, "maxDepth": 16, "depthResolutionScale": 2, "maxDepthDarkening": 0.16, "artefactFootprintSize": 2, "artefactCountMultiplier": 2, "brushRadius": 1, "brushTravelPerStampCells": 3, "scoopRadius": 3, "scoopPillarExtraDepth": 1, "bedrock": true },
+  "trench": {
+    "columns": 20,
+    "rows": 20,
+    "maxDepth": 16,
+    "depthResolutionScale": 2,
+    "maxDepthDarkening": 0.16,
+    "artefactFootprintSize": 2,
+    "artefactCountMultiplier": 2,
+    "brushRadius": 1,
+    "brushTravelPerStampCells": 3,
+    "scoopRadius": 3,
+    "scoopPillarExtraDepth": 1,
+    "shovelSwipeMinSpeedCellsPerSecond": 8,
+    "shovelSwipeMaxSpeedCellsPerSecond": 28,
+    "shovelSwipeSampleWindowMs": 120,
+    "clumpDecelerationCellsPerSecondSquared": 20,
+    "materialClumpWeights": { "layer-0": 0.8, "layer-1": 1, "layer-2": 1.35, "layer-3": 1.6 },
+    "grassCover": { "colour": "#54733f", "pattern": "grass" },
+    "grassCoverageVariants": [0, 0.5, 1],
+    "effects": {
+      "brushParticleLimitFull": 256,
+      "brushParticleLimitLite": 96,
+      "clumpLimitFull": 16,
+      "clumpLimitLite": 8
+    },
+    "bedrock": true
+  },
   "cleaning": {
     "dirtSpotsPerFace": 48,
     "completionRatio": 0.9,
     "handwashPowerPerDunk": 0.125,
+    "handwashReversePowerRatio": 0.75,
     "brushRadii": { "toothbrush": 0.14, "fine-brush": 0.09 },
     "toolPower": { "toothbrush": 1, "fine-brush": 0.5 },
     "effects": {
@@ -15,7 +42,11 @@
       "waterDuration": 500,
       "dirtParticlesPerEvent": 8,
       "dirtParticleLimit": 80,
-      "dirtDuration": 320
+      "dirtDuration": 320,
+      "liteDirtParticleLimit": 40,
+      "liteWaterDropletLimit": 20,
+      "liteWaterRippleLimit": 4,
+      "liteSpawnScale": 0.5
     }
   },
   "layers": ["Topsoil", "Sandy silt", "Clay", "Gravel"],
