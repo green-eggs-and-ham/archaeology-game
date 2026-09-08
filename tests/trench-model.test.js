@@ -204,6 +204,26 @@ test("terrain revisions advance only for successful depth mutations", () => {
   assert.equal(trench.visualRevision, 4);
 });
 
+test("direct artefact collection preserves the same revealed-only model guard", () => {
+  const trench = model();
+  const artefact = {
+    id: "touch-target",
+    exposure: "revealed",
+    footprint: trench.createFootprint(3, 3, 2)
+  };
+  const external = { id: "external", exposure: "revealed", footprint: artefact.footprint };
+  trench.artefacts = [artefact];
+  const revision = trench.visualRevision;
+
+  assert.equal(trench.collectArtefact(external), null);
+  artefact.exposure = "partial";
+  assert.equal(trench.collectArtefact(artefact), null);
+  artefact.exposure = "revealed";
+  assert.equal(trench.collectArtefact(artefact), artefact);
+  assert.equal(artefact.exposure, "collected");
+  assert.equal(trench.visualRevision, revision + 1);
+});
+
 test("blocked excavation does not advance either revision", () => {
   const brushedTrench = model();
   brushedTrench.brushCells(10, 10).forEach((cell) => {

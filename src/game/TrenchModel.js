@@ -529,7 +529,11 @@ window.TrenchModel = class TrenchModel {
     const artefact = this.artefacts.find(
       (item) => item.exposure === "revealed" && item.footprint.some((cell) => cell.x === x && cell.y === y)
     );
-    if (!artefact) return null;
+    return this.collectArtefact(artefact);
+  }
+
+  collectArtefact(artefact) {
+    if (!artefact || artefact.exposure !== "revealed" || !this.artefacts.includes(artefact)) return null;
     artefact.exposure = "collected";
     this.bumpVisualRevision();
     return artefact;

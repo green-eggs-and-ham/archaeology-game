@@ -12,32 +12,26 @@
 body {
   margin: 0;
   min-height: 100vh;
+  min-height: 100dvh;
   background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
 }
 
 .page-shell {
   max-width: 1340px;
+  min-height: 100vh;
+  min-height: 100dvh;
   margin: 0 auto;
-  padding: 1rem 1rem 1.5rem;
-}
-
-.hero {
-  margin-bottom: 0.75rem;
-}
-
-.hero h1 {
-  margin: 0 0 0.25rem;
-  font-size: clamp(1.55rem, 3vw, 2.35rem);
-}
-
-.hero p {
-  margin: 0;
-  max-width: 640px;
-  color: #cbd5e1;
-  line-height: 1.6;
+  padding:
+    max(0.55rem, env(safe-area-inset-top))
+    max(0.55rem, env(safe-area-inset-right))
+    max(0.55rem, env(safe-area-inset-bottom))
+    max(0.55rem, env(safe-area-inset-left));
+  display: flex;
+  align-items: center;
 }
 
 .game-card {
+  width: 100%;
   background: rgba(15, 23, 42, 0.9);
   border: 1px solid rgba(148, 163, 184, 0.25);
   border-radius: 24px;
@@ -52,6 +46,7 @@ body {
   align-items: center;
   width: 100%;
   max-width: min(1280px, calc((100vh - 8rem) * 1.7778));
+  max-width: min(1280px, calc((100dvh - 2.6rem) * 1.7778));
   aspect-ratio: 16 / 9;
   min-height: 180px;
   margin: 0 auto;
@@ -170,11 +165,11 @@ body > #p5_loading {
 
 @media (max-width: 640px) {
   .page-shell {
-    padding: 0.65rem 0.4rem 1rem;
-  }
-
-  .hero {
-    margin-bottom: 0.55rem;
+    padding:
+      max(0.3rem, env(safe-area-inset-top))
+      max(0.3rem, env(safe-area-inset-right))
+      max(0.3rem, env(safe-area-inset-bottom))
+      max(0.3rem, env(safe-area-inset-left));
   }
 
   .game-card {
@@ -193,14 +188,16 @@ body > #p5_loading {
 
 @media (max-width: 640px) and (orientation: landscape) {
   #game-shell {
-    max-width: min(100%, calc((100vh - 5.5rem) * 1.3333));
+    max-width: min(100%, calc((100vh - 1.5rem) * 1.3333));
+    max-width: min(100%, calc((100dvh - 1.5rem) * 1.3333));
     aspect-ratio: 4 / 3;
   }
 }
 
 @media (max-width: 640px) and (orientation: portrait) {
   #game-shell {
-    max-width: min(100%, calc((100vh - 6.5rem) * 0.75));
+    max-width: min(100%, calc((100vh - 1.5rem) * 0.75));
+    max-width: min(100%, calc((100dvh - 1.5rem) * 0.75));
     aspect-ratio: 3 / 4;
   }
 }

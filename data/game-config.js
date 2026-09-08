@@ -27,7 +27,7 @@ window.GameConfig = {
     shovelSwipeMinSpeedCellsPerSecond: 8,
     shovelSwipeMaxSpeedCellsPerSecond: 28,
     shovelSwipeSampleWindowMs: 120,
-    clumpDecelerationCellsPerSecondSquared: 20,
+    clumpDecelerationCellsPerSecondSquared: 30,
     materialClumpWeights: {
       "layer-0": 0.8,
       "layer-1": 1,
@@ -40,8 +40,8 @@ window.GameConfig = {
     },
     grassCoverageVariants: [0, 0.5, 1],
     effects: {
-      brushParticleLimitFull: 256,
-      brushParticleLimitLite: 96,
+      brushParticleLimitFull: 384,
+      brushParticleLimitLite: 128,
       clumpLimitFull: 16,
       clumpLimitLite: 8
     }

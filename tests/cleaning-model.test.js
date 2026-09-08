@@ -223,7 +223,7 @@ test("shared inventory returns collected artefact objects without copying them",
   assert.equal(inventory[0], first);
 });
 
-test("inventory views sort by name and filter every requested status group", () => {
+test("inventory sorting always includes every find and prioritises cleanable types by default", () => {
   const SceneManager = sandbox.window.SceneManager;
   const manager = Object.create(SceneManager.prototype);
   manager.cleaningModel = new CleaningModel(config.cleaning);
@@ -251,42 +251,68 @@ test("inventory views sort by name and filter every requested status group", () 
   const finds = [dirty, specialist, identify, unavailable, intermediate, active];
   finds.forEach((item) => { item.exposure = "collected"; });
   manager.trenches = [{ artefacts: finds }];
+  manager.collectionOrderByArtefactId = new Map(finds.map((item, index) => [item.id, index]));
 
-  manager.cleaningInventoryView = "name";
+  manager.cleaningInventorySort = "type";
+  assert.deepEqual(
+    Array.from(manager.cleaningInventoryArtefacts()),
+    [identify, specialist, intermediate, dirty, unavailable]
+  );
+  manager.cleaningInventorySort = "name";
   assert.deepEqual(
     Array.from(manager.cleaningInventoryArtefacts(), (item) => item.label),
     ["Alpha coin", "Bronze coin", "Glass bead", "Wet sherd", "Zulu sherd"]
   );
-  for (const [view, expected] of [
-    ["dirty", [dirty]],
-    ["specialist", [specialist]],
-    ["identify", [identify]],
-    ["other", [unavailable, intermediate]]
-  ]) {
-    manager.cleaningInventoryView = view;
-    assert.deepEqual(Array.from(manager.cleaningInventoryArtefacts()), expected);
-  }
+  manager.cleaningInventorySort = "status";
+  assert.deepEqual(
+    Array.from(manager.cleaningInventoryArtefacts()),
+    [dirty, intermediate, specialist, identify, unavailable]
+  );
+  manager.cleaningInventorySort = "collection";
+  assert.deepEqual(
+    Array.from(manager.cleaningInventoryArtefacts()),
+    [dirty, specialist, identify, unavailable, intermediate]
+  );
   assert.equal(JSON.stringify(manager.cleaningInventoryGrid(true)), JSON.stringify({ columns: 3, rows: 1 }));
   assert.equal(JSON.stringify(manager.cleaningInventoryGrid(false)), JSON.stringify({ columns: 1, rows: 6 }));
   assert.equal(manager.portraitInventoryLabel("Verulamium flagon sherd").replace("\n", " "), "Verulamium flagon sherd");
 });
 
-test("choosing an inventory view closes the chooser and resets pagination", () => {
+test("pending cleaning badges count unfinished cleanable workflows only", () => {
+  const SceneManager = sandbox.window.SceneManager;
+  const manager = Object.create(SceneManager.prototype);
+  manager.cleaningModel = new CleaningModel(config.cleaning);
+  const states = ["dirty", "wet", "ready-to-return", "ready-to-identify", "awaiting-specialist"];
+  const finds = states.map((status, index) => {
+    const item = artefact("mortarium", `pending-${index}`);
+    item.exposure = "collected";
+    item.cleaning.status = status;
+    return item;
+  });
+  const unavailable = artefact("glass-bead", "pending-unavailable");
+  unavailable.exposure = "collected";
+  manager.trenches = [{ artefacts: [...finds, unavailable] }];
+
+  assert.equal(manager.pendingCleaningCount(), 3);
+});
+
+test("choosing an inventory sort closes the chooser and resets pagination", () => {
   const SceneManager = sandbox.window.SceneManager;
   const manager = Object.create(SceneManager.prototype);
   manager.layout = {
     labBackButton: { x: -100, y: -100, width: 1, height: 1 },
-    inventoryViewOptions: [{ view: "specialist", bounds: { x: 10, y: 10, width: 80, height: 44 } }]
+    inventorySortOptions: [{ sort: "status", bounds: { x: 10, y: 10, width: 80, height: 44 } }]
   };
-  manager.cleaningInventoryChooserOpen = true;
-  manager.cleaningInventoryView = "all";
+  manager.cleaningInventorySortChooserOpen = true;
+  manager.cleaningInventorySort = "type";
   manager.cleaningInventoryPage = 4;
   manager.pointerAction = null;
+  manager.cleaningInventorySortLabel = () => "Cleaning status";
 
   manager.cleaningPointerStart(20, 20);
-  assert.equal(manager.cleaningInventoryView, "specialist");
+  assert.equal(manager.cleaningInventorySort, "status");
   assert.equal(manager.cleaningInventoryPage, 0);
-  assert.equal(manager.cleaningInventoryChooserOpen, false);
+  assert.equal(manager.cleaningInventorySortChooserOpen, false);
 });
 
 test("portrait mat controls and bucket stay inside their stacked panels", () => {
@@ -646,7 +672,7 @@ test("bucket occlusion uses the exact water aperture and toggles independently o
     bucketDunkAperture: { x: 50, y: 60, width: 100, height: 30 }
   };
   manager.bucketOcclusionMode = "obscured";
-  manager.cleaningInventoryChooserOpen = false;
+  manager.cleaningInventorySortChooserOpen = false;
   manager.pointerAction = { type: "cleaning-item", artefact: item, x: 100, y: 75, dunkPhase: "unarmed" };
   manager.cleaningDraggedItemBounds = () => ({ size: 64 });
   assert.equal(manager.immersedCleaningItem(), null, "being inside the ellipse without valid entry does not obscure a dry find");

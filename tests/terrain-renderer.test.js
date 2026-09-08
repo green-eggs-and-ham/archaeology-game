@@ -475,6 +475,7 @@ test("AO depth strength remains proportional after vertical resolution doubles",
 
 function configureBrushScene(scene, stamps) {
   scene.currentScene = "trench";
+  scene.tool = "brush";
   scene.layout = {
     grid: { x: 100, y: 100, width: 200, height: 200, cellSize: 10 },
     mapButton: { x: 0, y: 0, width: 40, height: 30 },
@@ -538,6 +539,18 @@ test("the player-facing tool name is Shovel while internal scoop APIs remain int
   assert.equal(sceneManagerSource.includes('"Scoop"'), false);
   assert.equal(sceneManagerSource.includes('"Shovel"'), true);
   assert.equal(fs.readFileSync(path.join(__dirname, "../README.md"), "utf8").includes("shovel-loads"), true);
+});
+
+test("every trench entry resets excavation to Shovel", () => {
+  const scene = manager();
+  assert.equal(scene.tool, "scoop");
+  scene.tool = "brush";
+  scene.selectTrench({ id: "first" });
+  assert.equal(scene.tool, "scoop");
+  assert.match(scene.message, /shovel-load/);
+  scene.tool = "brush";
+  scene.selectTrench({ id: "revisit" });
+  assert.equal(scene.tool, "scoop");
 });
 
 test("complete unsmoothed surface masks partition the full grid", () => {
@@ -956,8 +969,8 @@ test("coalesced brush movement processes every input segment before one visual f
 test("effect storage is FIFO-bounded and Lite mode applies the reduced limits", () => {
   const scene = manager();
   scene.config.trench.effects = {
-    brushParticleLimitFull: 256,
-    brushParticleLimitLite: 96,
+    brushParticleLimitFull: 384,
+    brushParticleLimitLite: 128,
     clumpLimitFull: 16,
     clumpLimitLite: 8
   };
@@ -993,14 +1006,58 @@ test("effect storage is FIFO-bounded and Lite mode applies the reduced limits", 
     );
   }
 
-  assert.equal(scene.brushParticles.length, 96);
+  assert.equal(scene.brushParticles.length, 128);
   assert.equal(scene.depositedClumps.length, 8);
   assert.equal(scene.cleaningWaterDrops.length, 20);
   assert.equal(scene.cleaningRipples.length, 4);
   assert.equal(scene.cleaningDirtParticles.length, 40);
-  assert.equal(scene.effectStats.brushParticleActive, 96);
+  assert.equal(scene.effectStats.brushParticleActive, 128);
   assert.equal(scene.effectStats.clumpActive, 8);
   assert.equal(scene.effectStats.cleaningEffectActive, 64);
+});
+
+test("excavation particles draw a cheap offset earth shadow before their soil fill", () => {
+  const scene = manager();
+  const previous = {
+    millis: sandbox.millis,
+    color: sandbox.color,
+    red: sandbox.red,
+    green: sandbox.green,
+    blue: sandbox.blue,
+    fill: sandbox.fill,
+    circle: sandbox.circle
+  };
+  const draws = [];
+  sandbox.millis = () => 100;
+  sandbox.color = () => ({ r: 120, g: 90, b: 60 });
+  sandbox.red = (value) => value.r;
+  sandbox.green = (value) => value.g;
+  sandbox.blue = (value) => value.b;
+  sandbox.fill = (...values) => draws.push(["fill", ...values]);
+  sandbox.circle = (...values) => draws.push(["circle", ...values]);
+  scene.scheduleEffectFrame = () => {};
+  scene.brushParticles = [{
+    x: 20,
+    y: 30,
+    vx: 0,
+    vy: 0,
+    size: 6,
+    colour: "#785a3c",
+    startedAt: 0,
+    duration: 200
+  }];
+  scene.depositedClumps = [];
+
+  scene.drawExcavationEffects();
+  const fills = draws.filter((draw) => draw[0] === "fill");
+  const circles = draws.filter((draw) => draw[0] === "circle");
+  assert.deepEqual(fills[0].slice(1, 4), [45, 31, 22]);
+  assert.ok(circles[0][1] > circles[1][1]);
+  assert.ok(circles[0][2] > circles[1][2]);
+  assert.ok(circles[0][3] > circles[1][3]);
+  assert.doesNotMatch(sceneManagerSource, /shadowBlur|shadowColor/);
+
+  Object.assign(sandbox, previous);
 });
 
 test("in-place effect compaction keeps the same array and releases expired entries", () => {
@@ -1104,6 +1161,9 @@ test("tool buttons and canvas pointers use shared hotspot-aligned vector icons",
     assert.ok(sceneManagerSource.includes(`icon: "${icon}"`));
   }
   assert.match(rendererSource, /pose === "pointing"/);
+  assert.match(rendererSource, /variant === "in-use"/);
+  assert.match(rendererSource, /#b98252/);
+  assert.match(rendererSource, /#668248/);
   assert.match(sceneManagerSource, /revealedArtefactAtCanvas/);
   assert.match(sceneManagerSource, /tapFeedback/);
   assert.match(stylesSource, /#game-shell\.is-ready,\s*#game-shell\.is-ready \*\s*\{[^}]*cursor:\s*none/s);
@@ -1116,12 +1176,82 @@ test("tool buttons and canvas pointers use shared hotspot-aligned vector icons",
 test("empty pressed pointer feedback follows movement in every scene", () => {
   const scene = manager();
   scene.currentScene = "site";
-  scene.pointer = { x: 10, y: 10, source: "mouse", pressed: true, feedbackTool: "hand", feedbackPose: "pointing" };
+  scene.pointer = {
+    x: 10,
+    y: 10,
+    source: "mouse",
+    pressed: true,
+    interactionTool: "hand",
+    interactionVariant: "pointing",
+    interactionPose: "pointing"
+  };
   scene.pointerAction = null;
   scene.pointerMove(75, 90, "mouse");
   assert.equal(scene.pointer.x, 75);
   assert.equal(scene.pointer.y, 90);
-  assert.equal(scene.pointer.feedbackPose, "pointing");
+  assert.equal(scene.pointer.interactionPose, "pointing");
+  assert.deepEqual({ ...scene.customPointerPresentation() }, { tool: "hand", variant: "pointing", pose: "pointing" });
+});
+
+test("active mouse and touch tools suppress concurrent pointing-glove feedback", () => {
+  const scene = manager();
+  const cursorDraws = [];
+  scene.renderer = { drawToolCursor: (...args) => cursorDraws.push(args) };
+  scene.interactionNow = () => 20;
+  sandbox.width = 300;
+  sandbox.height = 200;
+
+  scene.pointer = { x: 40, y: 50, source: "touch", pressed: true };
+  scene.tapFeedback = { x: 40, y: 50, startedAt: 0, duration: 180 };
+  scene.setPointerToolUse("brush");
+  scene.pointerAction = { type: "brush" };
+  scene.drawCustomPointer();
+  assert.equal(scene.tapFeedback, null);
+  assert.deepEqual(cursorDraws.map((draw) => draw.slice(0, 4)), [["brush", 40, 50, true]]);
+
+  cursorDraws.length = 0;
+  scene.pointer = { x: 70, y: 80, source: "mouse", pressed: true };
+  scene.pointerAction = { type: "cleaning-brush", tool: "fine-brush" };
+  scene.drawCustomPointer();
+  assert.deepEqual(cursorDraws.map((draw) => draw.slice(0, 4)), [["fine-brush", 70, 80, true]]);
+
+  delete sandbox.width;
+  delete sandbox.height;
+});
+
+test("a rejected trench tool press keeps tool ownership instead of showing the pointing glove", () => {
+  const scene = manager();
+  scene.currentScene = "trench";
+  scene.tool = "scoop";
+  scene.layout = {
+    grid: { x: 100, y: 100, width: 200, height: 200, cellSize: 10 },
+    mapButton: { x: 0, y: 0, width: 40, height: 30 },
+    brushButton: { x: 45, y: 0, width: 40, height: 30 },
+    scoopButton: { x: 90, y: 0, width: 40, height: 30 }
+  };
+  scene.activeTrench = {
+    id: "cursor-trench",
+    rows: 20,
+    columns: 20,
+    artefacts: [],
+    canScoop: () => ({ allowed: false, reason: "Bedrock has been reached here." })
+  };
+  scene.scheduleEffectFrame = () => {};
+  scene.requestFrame = () => {};
+
+  scene.pointerStart(105, 105, "touch");
+  assert.equal(scene.pointerAction, null);
+  assert.equal(scene.tapFeedback, null);
+  assert.deepEqual({ ...scene.customPointerPresentation() }, { tool: "scoop", variant: "in-use", pose: null });
+  scene.pointerMove(150, 150, "touch");
+  assert.deepEqual({ ...scene.customPointerPresentation() }, { tool: "scoop", variant: "in-use", pose: null });
+});
+
+test("the contextual Flip shortcut is icon-only with a full-sized centred symbol", () => {
+  assert.match(sceneManagerSource, /contextFlipButton, "", false, true, false/);
+  assert.match(sceneManagerSource, /iconOnly: true/);
+  assert.match(rendererSource, /iconOnly \? x \+ buttonWidth \/ 2/);
+  assert.match(rendererSource, /Math\.min\(buttonHeight \* 0\.58, buttonWidth \* 0\.58, 24\)/);
 });
 
 test("terrain worker coalesces requests, closes stale bitmaps, and accepts only the desired key", () => {
@@ -1435,7 +1565,14 @@ test("the trench finds indicator shows six icons when space permits and uses an 
   scene.drawInventory(testTrench, { x: 500, y: 10, width: 340, height: 38 });
   assert.equal(icons, 6);
   assert.equal(labels.some((label) => label.startsWith("+")), false);
+  assert.equal(scene.layout.findInventoryTargets.size, 6);
 
+  scene.collectionFlights = [{ artefact: artefacts[5], trenchId: "test" }];
+  icons = 0;
+  scene.drawInventory(testTrench, { x: 500, y: 10, width: 340, height: 38 });
+  assert.equal(icons, 5, "the destination icon is reserved until its flight completes");
+
+  scene.collectionFlights = [];
   icons = 0;
   labels.length = 0;
   scene.drawInventory(testTrench, { x: 240, y: 10, width: 130, height: 38 });
@@ -1452,6 +1589,14 @@ test("the trench finds indicator shows six icons when space permits and uses an 
   delete sandbox.CENTER;
   delete sandbox.BOLD;
   delete sandbox.NORMAL;
+});
+
+test("Finds lab buttons use numeric notification badges instead of bracketed labels", () => {
+  assert.match(rendererSource, /notificationBadge\(bounds, count\)/);
+  assert.match(rendererSource, /badgeCount/);
+  assert.match(sceneManagerSource, /button\(this\.layout\.labButton, "Finds lab"/);
+  assert.match(sceneManagerSource, /button\(this\.layout\.findsLabButton, "Finds lab"/);
+  assert.doesNotMatch(sceneManagerSource, /Finds lab \(\$\{this\.pendingCleaningCount\(\)\}\)/);
 });
 
 test("revealed artefacts override excavation cursors across their full footprint", () => {
@@ -1471,6 +1616,151 @@ test("revealed artefacts override excavation cursors across their full footprint
   assert.equal(scene.customPointerTool(), "brush");
 });
 
+test("touch collection expands revealed footprints by one cell and resolves overlaps by distance", () => {
+  const scene = manager();
+  scene.currentScene = "trench";
+  scene.layout = { grid: { x: 0, y: 0, width: 100, height: 100, cellSize: 10 } };
+  const first = {
+    id: "first",
+    exposure: "revealed",
+    centerX: 3.5,
+    centerY: 3.5,
+    footprint: [{ x: 3, y: 3 }, { x: 4, y: 3 }, { x: 3, y: 4 }, { x: 4, y: 4 }]
+  };
+  const second = {
+    id: "second",
+    exposure: "revealed",
+    centerX: 5.5,
+    centerY: 3.5,
+    footprint: [{ x: 5, y: 3 }, { x: 6, y: 3 }, { x: 5, y: 4 }, { x: 6, y: 4 }]
+  };
+  scene.activeTrench = { rows: 10, columns: 10, artefacts: [first, second] };
+
+  assert.equal(scene.collectionArtefactAtCanvas(22, 40, "mouse"), null, "mouse collection remains exact-cell based");
+  assert.equal(scene.collectionArtefactAtCanvas(22, 40, "touch"), first, "the adjacent cell is included for touch");
+  assert.equal(scene.collectionArtefactAtCanvas(48, 40, "touch"), first, "the nearest overlapping target wins");
+  assert.equal(scene.collectionArtefactAtCanvas(50, 40, "touch"), first, "artefact order breaks an exact distance tie");
+  assert.equal(scene.collectionArtefactAtCanvas(-1, 40, "touch"), null, "expanded targets remain clipped to the trench");
+});
+
+test("clicking a revealed artefact commits collection and starts its inventory flight", () => {
+  const scene = manager();
+  const find = {
+    id: "clickable-find",
+    label: "Clickable find",
+    exposure: "revealed",
+    centerX: 3.5,
+    centerY: 4.5,
+    footprint: [{ x: 3, y: 4 }, { x: 4, y: 4 }, { x: 3, y: 5 }, { x: 4, y: 5 }]
+  };
+  scene.currentScene = "trench";
+  scene.layout = {
+    grid: { x: 0, y: 0, width: 200, height: 200, cellSize: 10 },
+    mapButton: { x: -100, y: -100, width: 1, height: 1 },
+    brushButton: { x: -100, y: -100, width: 1, height: 1 },
+    scoopButton: { x: -100, y: -100, width: 1, height: 1 },
+    findsLabButton: { x: -100, y: -100, width: 1, height: 1 }
+  };
+  scene.activeTrench = {
+    id: "click-trench",
+    rows: 20,
+    columns: 20,
+    artefacts: [find],
+    collectAt(x, y) {
+      if (find.exposure !== "revealed" || !find.footprint.some((cell) => cell.x === x && cell.y === y)) return null;
+      find.exposure = "collected";
+      return find;
+    }
+  };
+  scene.handleDebugPointerStart = () => false;
+  scene.scheduleEffectFrame = () => {};
+  scene.requestFrame = () => {};
+
+  scene.pointerStart(40, 50, "mouse");
+
+  assert.equal(find.exposure, "collected");
+  assert.equal(scene.collectionFlights.length, 1);
+  assert.equal(scene.collectionFlights[0].artefact, find);
+  assert.equal(scene.pointer.interactionTool, "hand");
+});
+
+test("same-find shovel coaching triggers at three of five attempts and persists until reveal", () => {
+  const scene = manager();
+  const first = { id: "buried-first", exposure: "partial" };
+  const second = { id: "buried-second", exposure: "partial" };
+  scene.activeTrench = { id: "coach-trench" };
+  scene.recordShovelAttempt(first);
+  scene.recordShovelAttempt(null);
+  scene.recordShovelAttempt(first);
+  scene.recordShovelAttempt(second);
+  assert.equal(scene.activeArtefactCoach, null);
+  assert.equal(scene.recordShovelAttempt(first), true);
+  assert.equal(scene.activeArtefactCoach.artefact, first);
+  assert.equal(scene.activeArtefactCoach.promptVisible, true);
+  assert.equal(scene.shovelAttemptHistory.get("coach-trench").length, 0);
+
+  scene.activeArtefactCoach.promptVisible = false;
+  scene.updateArtefactCoachCompletion();
+  assert.equal(scene.activeArtefactCoach.artefact, first, "selecting Brush leaves the find highlight active");
+  first.exposure = "revealed";
+  scene.updateArtefactCoachCompletion();
+  assert.equal(scene.activeArtefactCoach, null);
+  assert.equal(scene.artefactCoaches.has("coach-trench"), false);
+  for (let index = 0; index < 3; index += 1) scene.recordShovelAttempt(second);
+  assert.equal(scene.activeArtefactCoach.artefact, second, "a later artefact can receive its own coaching");
+});
+
+test("selecting Brush dismisses coaching copy but keeps the artefact target highlighted", () => {
+  const scene = manager();
+  const artefact = { id: "coach-find", exposure: "partial" };
+  const coach = { trenchId: "coach-trench", artefact, promptVisible: true };
+  scene.currentScene = "trench";
+  scene.activeTrench = { id: "coach-trench" };
+  scene.activeArtefactCoach = coach;
+  scene.artefactCoaches = new Map([["coach-trench", coach]]);
+  scene.layout = {
+    mapButton: { x: 0, y: 0, width: 20, height: 20 },
+    brushButton: { x: 30, y: 0, width: 40, height: 20 },
+    scoopButton: { x: 80, y: 0, width: 40, height: 20 },
+    findsLabButton: { x: 130, y: 0, width: 40, height: 20 }
+  };
+  scene.handleDebugPointerStart = () => false;
+
+  scene.pointerStart(50, 10, "mouse");
+
+  assert.equal(scene.tool, "brush");
+  assert.equal(coach.promptVisible, false);
+  assert.equal(scene.activeArtefactCoach, coach);
+  assert.equal(scene.artefactCoaches.get("coach-trench"), coach);
+});
+
+test("collection flights ease from the trench to a reserved inventory target", () => {
+  const scene = manager();
+  const find = { id: "flying-find", centerX: 3.5, centerY: 4.5 };
+  scene.activeTrench = { id: "flight-trench", artefacts: [find] };
+  scene.layout = {
+    grid: { x: 10, y: 20, width: 200, height: 200, cellSize: 10 },
+    findInventoryTargets: new Map([[find.id, { x: 260, y: 24, size: 14 }]])
+  };
+  scene.collectionFlights = [{ artefact: find, trenchId: "flight-trench", startedAt: 0, duration: 450 }];
+  let now = 225;
+  scene.interactionNow = () => now;
+  scene.scheduleEffectFrame = () => {};
+  let requested = 0;
+  scene.requestFrame = () => { requested += 1; };
+  const renders = [];
+  scene.renderer.artefact = (...args) => renders.push(args);
+
+  scene.drawCollectionFlights();
+  assert.equal(renders.length, 1);
+  assert.ok(renders[0][1] > 50 && renders[0][1] < 260);
+  assert.equal(scene.collectionFlights.length, 1);
+  now = 450;
+  scene.drawCollectionFlights();
+  assert.equal(scene.collectionFlights.length, 0);
+  assert.equal(requested, 1, "a final frame reveals the normal header icon");
+});
+
 test("the page reserves its canvas and exposes progressive boot and failure states", () => {
   assert.match(indexSource, /class="canvas-skeleton"/);
   assert.match(indexSource, /id="game-loading-progress"/);
@@ -1482,12 +1772,19 @@ test("the page reserves its canvas and exposes progressive boot and failure stat
   assert.match(stylesSource, /max-width:\s*min\(1280px/);
   assert.match(stylesSource, /aspect-ratio:\s*16\s*\/\s*9/);
   assert.match(stylesSource, /@media \(max-width: 640px\).*aspect-ratio:\s*3\s*\/\s*4/s);
+  assert.doesNotMatch(indexSource, /A portable excavation and artefact-care prototype/);
+  assert.doesNotMatch(indexSource, /<header class="hero">/);
+  assert.match(stylesSource, /100dvh/);
 });
 
-test("configured clump motion decays at twice its original rate", () => {
+test("configured clump motion decays at thirty cell units per second squared", () => {
   const jsConfigSource = fs.readFileSync(path.join(__dirname, "../data/game-config.js"), "utf8");
   const jsonConfig = JSON.parse(fs.readFileSync(path.join(__dirname, "../data/game-config.json"), "utf8"));
-  assert.match(jsConfigSource, /clumpDecelerationCellsPerSecondSquared:\s*20/);
-  assert.equal(jsonConfig.trench.clumpDecelerationCellsPerSecondSquared, 20);
-  assert.match(sceneManagerSource, /clumpDecelerationCellsPerSecondSquared \|\| 20/);
+  assert.match(jsConfigSource, /clumpDecelerationCellsPerSecondSquared:\s*30/);
+  assert.equal(jsonConfig.trench.clumpDecelerationCellsPerSecondSquared, 30);
+  assert.match(sceneManagerSource, /clumpDecelerationCellsPerSecondSquared \|\| 30/);
+  assert.equal(jsonConfig.trench.effects.brushParticleLimitFull, 384);
+  assert.equal(jsonConfig.trench.effects.brushParticleLimitLite, 128);
+  assert.match(jsConfigSource, /brushParticleLimitFull:\s*384/);
+  assert.match(jsConfigSource, /brushParticleLimitLite:\s*128/);
 });
