@@ -3,6 +3,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
 const vm = require("node:vm");
+const { mobileWebKitTerrainFixture } = require("./fixtures/mobile-webkit-terrain.js");
 
 const operations = [];
 const drawingContext = {
@@ -82,7 +83,7 @@ function grid(cellSize = 10) {
   return { x: 0, y: 0, width: cellSize * 20, height: cellSize * 20, cellSize };
 }
 
-test("junction patches batch exact cell-centre regions without per-patch painting in every A/B combination", () => {
+test("junction patches form a pixel-snapped partition without even-odd colour fills", () => {
   const first = surface("first", 2, "#aa7744");
   const second = surface("second", 2, "#557799");
   const field = [[first, second], [second, first]];
@@ -104,13 +105,14 @@ test("junction patches batch exact cell-centre regions without per-patch paintin
       assert.equal(descriptors[0].logicalSpan, 5);
       assert.deepEqual([...descriptors[0].lobes].map((lobe) => lobe.corner), ["tr", "bl"]);
       assert.equal(operations.some((operation) => operation[0] === "clip"), false);
-      assert.equal(operations.some((operation) => operation[0] === "fillRect"), false);
+      assert.equal(operations.some((operation) => operation[0] === "fillRect"), true);
       assert.equal(operations.some((operation) => operation[0] === "contextStroke"), false, "equal-depth lobes have no AO");
       const fills = operations.filter((operation) => operation[0] === "fill");
-      assert.equal(fills.length, 2, "each full signature is filled once");
-      fills.forEach((fillOperation) => assert.equal(fillOperation[2], "evenodd"));
+      assert.equal(fills.length, 2, "the two non-owner lobes are the only curved fills");
+      fills.forEach((fillOperation) => assert.equal(fillOperation[2], undefined));
 
-      const regions = scene.collectJunctionSurfaceRegions(descriptors);
+      const patches = scene.collectPixelSnappedSurfacePatches(field, testTrench, grid(), descriptors);
+      const regions = scene.collectSurfaceRegionsFromPatches(patches);
       const ownerRegion = regions.get(descriptors[0].owner.signature);
       const lobeRegion = regions.get(descriptors[0].lobes[0].surface.signature);
       assert.equal(ownerRegion.ownerPatches.length, 1);
@@ -120,7 +122,7 @@ test("junction patches batch exact cell-centre regions without per-patch paintin
   }
 });
 
-test("adjacent junctions batch each signature once instead of repainting owner rectangles", () => {
+test("adjacent junction patches share exact physical boundaries without clips", () => {
   const high = surface("high", 0, "#aa7744");
   const low = surface("low", 3, "#557799");
   const field = [[high, low, high], [low, high, low]];
@@ -130,26 +132,84 @@ test("adjacent junctions batch each signature once instead of repainting owner r
 
   const descriptors = scene.drawLocalJunctions(field, trench(2, 3, [high.layer, low.layer]), grid());
   assert.equal(descriptors.length, 2);
-  assert.equal(operations.filter((operation) => operation[0] === "fill").length, 2);
-  assert.equal(operations.some((operation) => operation[0] === "fillRect"), false);
+  assert.equal(descriptors[0].bounds.right, descriptors[1].bounds.left);
+  assert.equal(operations.some((operation) => operation[0] === "fillRect"), true);
+  assert.equal(operations.some((operation) => operation[0] === "clip"), false);
+  assert.equal(operations.filter((operation) => operation[0] === "fill" && operation[2] === "evenodd").length, 0);
 });
 
-test("batched regions render deeper signatures before shallower signatures", () => {
+test("the iOS stress fixture has mixed shared axes while its snapped atlas owns every physical pixel once", () => {
+  const scenarios = [
+    { viewport: "iPhone 8", density: 2, gridSize: 284.25 },
+    { viewport: "iPhone 13 mini DPR 3 emulation", density: 3, gridSize: 270.75 },
+    { viewport: "desktop fallback", density: 1, gridSize: 360.4 }
+  ];
+  const fixture = mobileWebKitTerrainFixture();
+
+  scenarios.forEach(({ viewport, density, gridSize }) => {
+    const scene = manager();
+    scene.terrainSmoothingMode = "focus";
+    scene.ridgeDirectionMode = "current";
+    const testGrid = {
+      x: 17.25,
+      y: 111.75,
+      width: gridSize,
+      height: gridSize,
+      cellSize: gridSize / fixture.trench.columns
+    };
+    const junctions = scene.buildLocalJunctionDescriptors(fixture.field, fixture.trench, testGrid);
+    const patches = scene.collectPixelSnappedSurfacePatches(
+      fixture.field,
+      fixture.trench,
+      testGrid,
+      junctions,
+      density
+    );
+    assert.ok(junctions.length > 20, `${viewport} fixture must exercise many mixed smoothed junctions`);
+
+    const left = Math.floor(testGrid.x * density);
+    const top = Math.floor(testGrid.y * density);
+    const right = Math.ceil((testGrid.x + testGrid.width) * density);
+    const bottom = Math.ceil((testGrid.y + testGrid.height) * density);
+    const physicalWidth = right - left;
+    const physicalHeight = bottom - top;
+    const coverage = new Uint8Array(physicalWidth * physicalHeight);
+
+    patches.forEach((patch) => {
+      const pieces = patch.smoothed ? [patch.bounds] : patch.pieces.map((piece) => piece.bounds);
+      pieces.forEach((bounds) => {
+        const x0 = Math.round(bounds.left * density) - left;
+        const x1 = Math.round(bounds.right * density) - left;
+        const y0 = Math.round(bounds.top * density) - top;
+        const y1 = Math.round(bounds.bottom * density) - top;
+        assert.equal(bounds.left * density, Math.round(bounds.left * density), `${viewport} left edge is physical-pixel aligned`);
+        assert.equal(bounds.top * density, Math.round(bounds.top * density), `${viewport} top edge is physical-pixel aligned`);
+        for (let y = y0; y < y1; y += 1) {
+          for (let x = x0; x < x1; x += 1) coverage[y * physicalWidth + x] += 1;
+        }
+      });
+    });
+
+    assert.equal(coverage.includes(0), false, `${viewport} contains no safety-base seam pixels`);
+    assert.equal(coverage.some((count) => count !== 1), false, `${viewport} assigns each physical pixel exactly once`);
+  });
+});
+
+test("each smoothed patch paints its authoritative owner before its lobes", () => {
   const shallow = surface("shallow", 1, "#aa7744");
   const deep = surface("deep", 5, "#557799");
   const scene = manager();
   operations.length = 0;
 
-  scene.drawLocalJunctions(
+  const descriptors = scene.drawLocalJunctions(
     [[shallow, deep], [deep, shallow]],
     trench(2, 2, [shallow.layer, deep.layer]),
     grid()
   );
-
-  assert.deepEqual(
-    operations.filter((operation) => operation[0] === "fill").map((operation) => operation[1]),
-    [deep.layer.colour, shallow.layer.colour]
-  );
+  assert.equal(descriptors[0].owner.signature, deep.signature);
+  const ownerIndex = operations.findIndex((operation) => operation[0] === "fillRect" && operation[5] === deep.layer.colour);
+  const lobeIndex = operations.findIndex((operation) => operation[0] === "fill" && operation[1] === shallow.layer.colour);
+  assert.ok(ownerIndex >= 0 && lobeIndex > ownerIndex);
 });
 
 test("opaque base cells overlap on every edge at fractional cell sizes", () => {
@@ -193,7 +253,8 @@ test("Focus mode leaves an ordinary large 2:2 boundary on the opaque base", () =
   operations.length = 0;
 
   assert.equal(scene.drawLocalJunctions(field, trench(2, 2, [first.layer, second.layer]), grid()).length, 0);
-  assert.equal(operations.some((operation) => operation[0] === "fillRect"), false);
+  assert.equal(operations.some((operation) => operation[0] === "fillRect"), true);
+  assert.equal(operations.some((operation) => operation[0] === "fill"), false, "no curved feature is introduced");
 });
 
 test("Focus mode leaves small cardinal 2:2 joins flush but still rounds their 3:1 corners", () => {
@@ -274,41 +335,51 @@ test("terrain cache identity ignores overlay-only state and follows terrain revi
   assert.notEqual(scene.gridCacheKey(testTrench, testGrid), initial);
 });
 
-test("the ridge control toggles direction while retaining compatible terrain during rebuilding", () => {
+test("the debug ridge control toggles direction while retaining compatible terrain during rebuilding", () => {
   const scene = manager();
   scene.currentScene = "trench";
   scene.ridgeDirectionMode = "current";
   scene.gridCache = { key: "stale" };
-  scene.layout = {
-    mapButton: { x: 0, y: 0, width: 40, height: 30 },
-    brushButton: { x: 45, y: 0, width: 40, height: 30 },
-    scoopButton: { x: 90, y: 0, width: 40, height: 30 },
-    depthButton: { x: 0, y: 35, width: 40, height: 30 },
-    smoothingButton: { x: 45, y: 35, width: 70, height: 30 },
-    pillarButton: { x: 120, y: 35, width: 70, height: 30 },
-    ridgeButton: { x: 195, y: 35, width: 80, height: 30 }
-  };
-
-  scene.pointerStart(220, 50);
+  scene.activateDebugOption("ridge");
   assert.equal(scene.ridgeDirectionMode, "high-cut");
   assert.equal(scene.gridCache.key, "stale");
   assert.equal(scene.terrainWorkerDesiredKey, null);
 });
 
-test("all five diagnostic controls share one non-overlapping row", () => {
+test("all six diagnostics live in a two-column overlay without reserving scene space", () => {
   const scene = manager();
-  const buttons = scene.diagnosticButtonLayout(600, 52, 30, 6);
-  const row = [buttons.depth, buttons.performance, buttons.smoothing, buttons.pillar, buttons.ridge];
-
-  row.forEach((button) => {
-    assert.equal(button.y, 52);
-    assert.equal(button.height, 30);
+  sandbox.width = 600;
+  sandbox.height = 400;
+  scene.debugMenuOpen = true;
+  const debug = scene.debugMenuLayout();
+  assert.equal(debug.options.length, 6);
+  assert.deepEqual(Array.from(debug.options, (entry) => entry.id), ["depth", "performance", "smoothing", "pillar", "ridge", "water"]);
+  assert.equal(debug.button.width, 44);
+  assert.equal(debug.button.height, 44);
+  debug.options.forEach((option) => {
+    assert.ok(option.bounds.x >= debug.panel.x && option.bounds.x + option.bounds.width <= debug.panel.x + debug.panel.width);
+    assert.ok(option.bounds.y >= debug.panel.y && option.bounds.y + option.bounds.height <= debug.panel.y + debug.panel.height);
   });
-  for (let index = 1; index < row.length; index += 1) {
-    assert.equal(row[index].x - (row[index - 1].x + row[index - 1].width), 6);
-  }
-  assert.ok(Math.abs(buttons.ridge.x + buttons.ridge.width - 588) < 1e-9);
-  assert.ok(buttons.depth.width < buttons.smoothing.width);
+  delete sandbox.width;
+  delete sandbox.height;
+});
+
+test("an outside tap closes the debug overlay before the underlying scene handles it", () => {
+  const scene = manager();
+  sandbox.width = 600;
+  sandbox.height = 400;
+  scene.currentScene = "site";
+  scene.debugMenuOpen = true;
+  const debug = scene.debugMenuLayout();
+  scene.layout = { debugButton: debug.button, debugPanel: debug.panel, debugOptions: debug.options };
+  scene.requestFrame = () => {};
+  let mapHits = 0;
+  scene.hitMapTile = () => { mapHits += 1; return null; };
+  scene.pointerStart(5, 5, "mouse");
+  assert.equal(scene.debugMenuOpen, false);
+  assert.equal(mapHits, 0);
+  delete sandbox.width;
+  delete sandbox.height;
 });
 
 test("performance mode participates in caching and Lite locks visual comparison controls", () => {
@@ -319,26 +390,20 @@ test("performance mode participates in caching and Lite locks visual comparison 
   scene.performanceMode = "lite";
   assert.notEqual(scene.gridCacheKey(testTrench, testGrid), fullKey);
 
-  scene.currentScene = "trench";
-  scene.layout = {
-    mapButton: { x: 0, y: 0, width: 10, height: 10 },
-    brushButton: { x: 12, y: 0, width: 10, height: 10 },
-    scoopButton: { x: 24, y: 0, width: 10, height: 10 },
-    depthButton: { x: 0, y: 12, width: 10, height: 10 },
-    performanceButton: { x: 12, y: 12, width: 20, height: 10 },
-    smoothingButton: { x: 34, y: 12, width: 20, height: 10 },
-    pillarButton: { x: 56, y: 12, width: 20, height: 10 },
-    ridgeButton: { x: 78, y: 12, width: 20, height: 10 }
-  };
   scene.gridCache = { key: "stale" };
   scene.ambientBuffer = { stale: true };
   const originalSmoothing = scene.terrainSmoothingMode;
-  scene.pointerStart(40, 16);
+  sandbox.width = 600;
+  sandbox.height = 400;
+  scene.debugMenuOpen = true;
+  assert.equal(scene.debugMenuLayout().options.find((option) => option.id === "smoothing").disabled, true);
   assert.equal(scene.terrainSmoothingMode, originalSmoothing);
-  scene.pointerStart(20, 16);
+  scene.activateDebugOption("performance");
   assert.equal(scene.performanceMode, "full");
   assert.equal(scene.gridCache.key, "stale");
   assert.equal(scene.ambientBuffer, null);
+  delete sandbox.width;
+  delete sandbox.height;
 });
 
 test("Lite fields skip pillar merging and component analysis", () => {
@@ -509,7 +574,7 @@ test("complete masks retain smoothed owner holes and positive diagonal lobes", (
   assert.equal(lobeRegion.positiveLobes.length, 2);
 });
 
-test("Full mode compiles reusable surface paths for terrain and clipping", () => {
+test("Full mode compiles reusable surface paths for AO clipping", () => {
   class FakePath2D {
     constructor() { this.operations = []; }
     addPath(path) { this.operations.push(["addPath", path]); }
@@ -534,31 +599,21 @@ test("Full mode compiles reusable surface paths for terrain and clipping", () =>
   assert.equal(prepared.byDepth.length, 1);
   assert.ok(prepared.byDepth[0].compiledPath instanceof FakePath2D);
   regions.forEach((region) => assert.ok(region.compiledPath instanceof FakePath2D));
-  const originalAppend = scene.appendSurfaceRegionPath;
-  scene.appendSurfaceRegionPath = () => { throw new Error("compiled paths should be reused during drawing"); };
-  regions.forEach((region) => scene.drawSurfaceRegion(region));
-  scene.appendSurfaceRegionPath = originalAppend;
+  assert.equal(typeof scene.drawSurfaceRegion, "undefined", "compound even-odd terrain colour fills have been removed");
   delete sandbox.Path2D;
 });
 
-test("terrain renders deepest terrain, patterns, and AO before the next shallower depth", () => {
+test("pixel-snapped terrain renders once before patterns and the clipped AO buffer", () => {
   const scene = manager();
   const order = [];
-  const deep = surface("deep", 5, "#557799");
-  const shallow = surface("shallow", 1, "#aa7744");
-  const regions = new Map([
-    [deep.signature, { signature: deep.signature, surface: deep, rectangles: [], ownerPatches: [], positiveLobes: [] }],
-    [shallow.signature, { signature: shallow.signature, surface: shallow, rectangles: [], ownerPatches: [], positiveLobes: [] }]
-  ]);
-  scene.drawSurfaceRegion = (region) => order.push(`terrain:${region.surface.depth}`);
+  scene.drawPixelSnappedSurfacePatches = () => order.push("terrain-patches");
   scene.drawTerrainPatterns = (_field, _trench, _grid, depth) => order.push(`patterns:${depth}`);
-  scene.appendSurfaceRegionPath = () => {};
   const originalDrawImage = drawingContext.drawImage;
   drawingContext.drawImage = () => order.push("ao");
-  scene.drawDepthCompositedTerrain([], trench(0, 0, [shallow.layer, deep.layer]), grid(), regions, { canvas: {} });
+  scene.drawDepthCompositedTerrain([], trench(0, 0, []), grid(), new Map(), { canvas: {} }, null, null, []);
   drawingContext.drawImage = originalDrawImage;
 
-  assert.deepEqual(order, ["terrain:5", "patterns:5", "ao", "terrain:1", "patterns:1", "ao"]);
+  assert.deepEqual(order, ["terrain-patches", "patterns:null", "ao"]);
 });
 
 test("cardinal AO is collected as filled ribbons on the deeper side", () => {
@@ -860,6 +915,7 @@ test("a direct draw consumes a queued frame instead of presenting a duplicate re
   sandbox.redraw = () => { redraws += 1; };
   scene.renderer.drawBackground = () => {};
   scene.drawSiteMap = () => {};
+  scene.drawDebugMenu = () => {};
   scene.drawCustomPointer = () => {};
 
   scene.requestFrame();
@@ -1271,7 +1327,131 @@ test("the worker and main thread share the authoritative terrain geometry module
   assert.match(terrainWorkerSource, /let terrainCanvas = null/);
   assert.match(terrainWorkerSource, /terrainSurface\(request\.pixelWidth, request\.pixelHeight\)/);
   assert.match(terrainGraphicsSource, /buildLocalJunctionDescriptors/);
+  assert.match(terrainGraphicsSource, /collectPixelSnappedSurfacePatches/);
+  assert.match(terrainGraphicsSource, /drawPixelSnappedSurfacePatches/);
   assert.match(terrainGraphicsSource, /collectAmbientOcclusion/);
+});
+
+test("compact canvases cap high-density phones at DPR 2 within the pixel budget", () => {
+  const context = {
+    window: {
+      innerWidth: 375,
+      innerHeight: 667,
+      devicePixelRatio: 3,
+      GameConfig: {
+        canvas: {
+          compactBreakpoint: 640,
+          compactPixelDensity: 2,
+          maxCompactCanvasPixels: 1300000
+        }
+      }
+    },
+    document: {}
+  };
+  vm.createContext(context);
+  vm.runInContext(mainSource, context);
+  assert.equal(context.getCanvasPixelDensity({ width: 375, height: 500 }), 2);
+  context.window.innerWidth = 360;
+  assert.equal(context.getCanvasPixelDensity({ width: 360, height: 480 }), 2);
+  context.window.innerWidth = 560;
+  assert.equal(context.getCanvasPixelDensity({ width: 560, height: 747 }), 1, "the bounded pixel budget prevents an oversized backing surface");
+  context.window.innerWidth = 960;
+  assert.equal(context.getCanvasPixelDensity({ width: 960, height: 540 }), 1);
+  assert.match(mainSource, /pixelDensity\(activeCanvasDensity\);\s*const canvas = createCanvas/s);
+});
+
+test("compact portrait trench layouts prioritise the grid and retain a short profile strip", () => {
+  const scene = manager();
+  scene.activeTrench = { rows: 20, columns: 20 };
+  for (const [viewportWidth, viewportHeight] of [[320, 427], [360, 480], [375, 500], [390, 520], [560, 747]]) {
+    sandbox.width = viewportWidth;
+    sandbox.height = viewportHeight;
+    const layout = scene.trenchLayout();
+    assert.equal(layout.isPortrait, true);
+    assert.ok(layout.profile.height >= 78 && layout.profile.height <= 96);
+    assert.ok(layout.grid.height >= Math.min(230, viewportHeight * 0.5), `${viewportWidth}x${viewportHeight} keeps a useful excavation area`);
+    assert.ok(layout.grid.y + layout.grid.height < layout.profile.y);
+    assert.ok(layout.profile.y + layout.profile.height <= viewportHeight);
+  }
+  delete sandbox.width;
+  delete sandbox.height;
+});
+
+test("site hint measurement keeps its text inside the available panel at representative widths", () => {
+  const scene = manager();
+  scene.config.map = { rows: 0, columns: 0 };
+  scene.drawHeading = () => {};
+  scene.pendingCleaningCount = () => 0;
+  scene.renderer.button = () => {};
+  let fontSize = 10;
+  let panel = null;
+  sandbox.textSize = (value) => { fontSize = value; };
+  sandbox.textWidth = (value) => String(value).length * fontSize * 0.56;
+  sandbox.text = () => {};
+  sandbox.textAlign = () => {};
+  sandbox.textStyle = () => {};
+  sandbox.LEFT = "left";
+  sandbox.CENTER = "center";
+  scene.renderer.panel = (x, y, width, height) => { panel = { x, y, width, height }; };
+
+  for (const viewportWidth of [320, 360, 375, 390, 560, 960, 1280]) {
+    sandbox.width = viewportWidth;
+    sandbox.height = Math.round(viewportWidth * 4 / 3);
+    scene.drawSiteMap();
+    const measuredText = sandbox.textWidth("Tap a diamond to inspect a trench from above.");
+    assert.ok(panel.width <= viewportWidth - 36);
+    assert.ok(measuredText + 24 <= panel.width + 0.01);
+  }
+  delete sandbox.width;
+  delete sandbox.height;
+  delete sandbox.textSize;
+  delete sandbox.textWidth;
+  delete sandbox.text;
+  delete sandbox.textAlign;
+  delete sandbox.textStyle;
+  delete sandbox.LEFT;
+  delete sandbox.CENTER;
+});
+
+test("the trench finds indicator shows six icons when space permits and uses an overflow count when constrained", () => {
+  const scene = manager();
+  const artefacts = Array.from({ length: 6 }, (_, index) => ({ id: `find-${index}`, exposure: "collected" }));
+  const testTrench = { artefacts };
+  let fontSize = 10;
+  let icons = 0;
+  const labels = [];
+  sandbox.textSize = (value) => { fontSize = value; };
+  sandbox.textWidth = (value) => String(value).length * fontSize * 0.56;
+  sandbox.text = (value) => { labels.push(String(value)); };
+  sandbox.textAlign = () => {};
+  sandbox.textStyle = () => {};
+  sandbox.LEFT = "left";
+  sandbox.TOP = "top";
+  sandbox.CENTER = "center";
+  sandbox.BOLD = "bold";
+  sandbox.NORMAL = "normal";
+  scene.renderer.artefact = () => { icons += 1; };
+
+  scene.drawInventory(testTrench, { x: 500, y: 10, width: 340, height: 38 });
+  assert.equal(icons, 6);
+  assert.equal(labels.some((label) => label.startsWith("+")), false);
+
+  icons = 0;
+  labels.length = 0;
+  scene.drawInventory(testTrench, { x: 240, y: 10, width: 130, height: 38 });
+  assert.ok(icons < 6);
+  assert.ok(labels.some((label) => /^\+\d+$/.test(label)));
+
+  delete sandbox.textSize;
+  delete sandbox.textWidth;
+  delete sandbox.text;
+  delete sandbox.textAlign;
+  delete sandbox.textStyle;
+  delete sandbox.LEFT;
+  delete sandbox.TOP;
+  delete sandbox.CENTER;
+  delete sandbox.BOLD;
+  delete sandbox.NORMAL;
 });
 
 test("revealed artefacts override excavation cursors across their full footprint", () => {

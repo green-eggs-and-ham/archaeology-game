@@ -15,6 +15,8 @@ window.SceneManager = class SceneManager {
     this.pillarRenderMode = "round";
     this.ridgeDirectionMode = "current";
     this.performanceMode = "full";
+    this.debugMenuOpen = false;
+    this.debugMessage = "Temporary visual and performance controls.";
     this.gridCache = null;
     this.profileCache = null;
     this.ambientBuffer = null;
@@ -86,6 +88,7 @@ window.SceneManager = class SceneManager {
     if (this.currentScene === "cleaning") this.pointerAction = null;
     this.tapFeedback = null;
     this.cleaningInventoryChooserOpen = false;
+    this.debugMenuOpen = false;
     this.mapTiles = [];
     this.layout = {};
     this.invalidateTerrainCache({ releaseGrid: true, releaseAmbient: true });
@@ -108,6 +111,7 @@ window.SceneManager = class SceneManager {
     if (this.currentScene === "site") this.drawSiteMap();
     else if (this.currentScene === "cleaning") this.drawCleaning();
     else this.drawTrench();
+    this.drawDebugMenu();
     this.drawCustomPointer();
   }
 
@@ -470,11 +474,20 @@ window.SceneManager = class SceneManager {
       }
     }
 
-    this.renderer.panel(18, height - 45, Math.min(width - 36, 385), 30, "#e6d3a9");
+    const hint = "Tap a diamond to inspect a trench from above.";
+    const hintMaxWidth = Math.max(120, width - 36);
+    let hintSize = Math.max(9, Math.min(14, width * 0.017));
+    textSize(hintSize);
+    while (hintSize > 9 && textWidth(hint) > hintMaxWidth - 24) {
+      hintSize -= 0.5;
+      textSize(hintSize);
+    }
+    const hintWidth = Math.min(hintMaxWidth, Math.max(210, textWidth(hint) + 24));
+    this.renderer.panel(18, height - 45, hintWidth, 30, "#e6d3a9");
     fill("#25444a");
     textAlign(LEFT, CENTER);
-    textSize(Math.max(10, width * 0.017));
-    text("Tap a diamond to inspect a trench from above.", 30, height - 30);
+    textSize(hintSize);
+    text(hint, 30, height - 30);
   }
 
   drawMapTile(tile, row, column) {
@@ -515,7 +528,7 @@ window.SceneManager = class SceneManager {
     const gap = Math.max(7, width * 0.012);
     const isPortrait = height > width;
     const headerHeight = isPortrait
-      ? Math.max(66, Math.min(76, height * 0.14))
+      ? Math.max(54, Math.min(62, height * 0.12))
       : Math.max(58, Math.min(68, height * 0.13));
     const backWidth = Math.max(82, Math.min(118, width * 0.22));
     const layout = {
@@ -525,8 +538,8 @@ window.SceneManager = class SceneManager {
     };
 
     if (isPortrait) {
-      const inventoryHeight = Math.max(120, Math.min(164, width * 0.38));
-      const bucketHeight = Math.max(84, Math.min(150, width * 0.28));
+      const inventoryHeight = Math.max(112, Math.min(145, width * 0.34));
+      const bucketHeight = Math.max(88, Math.min(132, width * 0.25));
       const inventoryY = headerHeight;
       const matY = inventoryY + inventoryHeight + gap;
       const bucketY = height - margin - bucketHeight;
@@ -585,14 +598,6 @@ window.SceneManager = class SceneManager {
       y: surfaceY,
       width: toolbarWidth,
       height: Math.max(1, layout.mat.y + layout.mat.height - surfaceY - matInset)
-    };
-    const bucketControlHeight = Math.max(24, Math.min(30, layout.bucket.height * 0.28));
-    const bucketControlWidth = Math.max(102, Math.min(172, layout.bucket.width * (isPortrait ? 0.43 : 0.3)));
-    layout.bucketModeButton = {
-      x: layout.bucket.x + layout.bucket.width - bucketControlWidth - 8,
-      y: layout.bucket.y + 6,
-      width: bucketControlWidth,
-      height: bucketControlHeight
     };
     return layout;
   }
@@ -1085,16 +1090,8 @@ window.SceneManager = class SceneManager {
     textSize(portrait ? Math.max(11, Math.min(14, bounds.height * 0.15)) : Math.max(10, Math.min(14, bounds.height * 0.1)));
     text("CLEAN WATER", bounds.x + 9, bounds.y + 8);
     textStyle(NORMAL);
-    this.renderer.button(
-      this.layout.bucketModeButton,
-      this.bucketOcclusionMode === "obscured" ? "Water B: Obscured" : "Water A: Visible",
-      this.bucketOcclusionMode === "obscured",
-      true,
-      false,
-      { minimumSize: portrait ? 7.5 : 8, maximumSize: portrait ? 10 : 11 }
-    );
     const bucketWidth = Math.min(bounds.width * 0.94, 600);
-    const headerBottom = Math.max(bounds.y + (portrait ? 31 : 34), this.layout.bucketModeButton.y + this.layout.bucketModeButton.height + 2);
+    const headerBottom = bounds.y + (portrait ? 28 : 31);
     const availableHeight = Math.max(28, bounds.y + bounds.height - headerBottom - 5);
     const bucketHeight = Math.max(28, availableHeight * 0.98);
     const centerX = bounds.x + bounds.width / 2;
@@ -1382,28 +1379,27 @@ window.SceneManager = class SceneManager {
   trenchLayout() {
     const margin = Math.max(12, width * 0.025);
     const isPortrait = height > width;
-    const primaryButtonHeight = Math.max(28, Math.min(38, height * 0.19));
-    const diagnosticButtonHeight = Math.max(26, Math.min(30, height * 0.065));
-    const titleSize = Math.max(12, width * 0.025);
-    const guidanceSize = Math.max(9, width * 0.015);
-    const diagnosticY = 17 + primaryButtonHeight;
-    const titleY = diagnosticY + diagnosticButtonHeight + 6;
+    const primaryButtonHeight = Math.max(32, Math.min(38, height * 0.095));
+    const titleSize = Math.max(12, Math.min(18, width * 0.025));
+    const guidanceSize = Math.max(9, Math.min(13, width * 0.015));
+    const titleY = 16 + primaryButtonHeight + 5;
     const guidanceY = titleY + titleSize * 1.2 + 3;
-    const statusY = guidanceY + guidanceSize * 1.45 + 8;
-    const headerHeight = statusY + Math.max(9, width * 0.015) * 0.7 + 6;
+    const statusY = guidanceY + guidanceSize * 1.35 + 3;
+    const headerHeight = statusY + Math.max(9, Math.min(13, width * 0.015)) * 1.25 + 5;
     const contentY = headerHeight + 6;
 
     if (isPortrait) {
-      const minimumProfileHeight = Math.max(92, width * 0.3);
-      const availableGridHeight = height - contentY - margin * 2 - minimumProfileHeight;
+      const profileHeight = Math.max(78, Math.min(96, width * 0.22));
+      const availableGridHeight = height - contentY - margin - profileHeight - 8;
       const cellSize = Math.max(8, Math.min((width - margin * 2) / this.activeTrench.columns, availableGridHeight / this.activeTrench.rows));
       const gridWidth = cellSize * this.activeTrench.columns;
       const gridHeight = cellSize * this.activeTrench.rows;
+      const profileY = contentY + gridHeight + 8;
       return {
         headerHeight,
         isPortrait,
         grid: { x: (width - gridWidth) / 2, y: contentY, width: gridWidth, height: gridHeight, cellSize },
-        profile: { x: margin, y: contentY + gridHeight + 10, width: width - margin * 2, height: height - (contentY + gridHeight + 10) - margin }
+        profile: { x: margin, y: profileY, width: width - margin * 2, height: Math.max(1, Math.min(profileHeight, height - profileY - margin)) }
       };
     }
 
@@ -1435,8 +1431,7 @@ window.SceneManager = class SceneManager {
   }
 
   drawTrenchHeader(trench) {
-    const buttonHeight = Math.max(28, Math.min(38, height * 0.19));
-    const diagnosticHeight = Math.max(26, Math.min(30, height * 0.065));
+    const buttonHeight = Math.max(32, Math.min(38, height * 0.095));
     const mapWidth = Math.max(70, width * 0.22);
     const toolWidth = Math.max(62, width * 0.18);
     this.layout.mapButton = { x: 12, y: 11, width: mapWidth, height: buttonHeight };
@@ -1446,47 +1441,9 @@ window.SceneManager = class SceneManager {
     this.renderer.button(this.layout.brushButton, "Brush", this.tool === "brush", false, false, { icon: "brush" });
     this.renderer.button(this.layout.scoopButton, "Shovel", this.tool === "scoop", false, false, { icon: "scoop" });
 
-    const diagnosticY = 17 + buttonHeight;
-    const diagnosticGap = 6;
-    const diagnosticButtons = this.diagnosticButtonLayout(width, diagnosticY, diagnosticHeight, diagnosticGap);
-    this.layout.depthButton = diagnosticButtons.depth;
-    this.layout.performanceButton = diagnosticButtons.performance;
-    this.layout.smoothingButton = diagnosticButtons.smoothing;
-    this.layout.pillarButton = diagnosticButtons.pillar;
-    this.layout.ridgeButton = diagnosticButtons.ridge;
-    this.renderer.button(this.layout.depthButton, "Depths", this.showDepthDebug, true);
-    this.renderer.button(
-      this.layout.performanceButton,
-      this.performanceMode === "full" ? "Performance: Full" : "Performance: Lite",
-      this.performanceMode === "lite",
-      true
-    );
-    const terrainControlsDisabled = this.performanceMode === "lite";
-    this.renderer.button(
-      this.layout.smoothingButton,
-      this.terrainSmoothingMode === "all" ? "Smooth A: All" : "Smooth B: Focus",
-      this.terrainSmoothingMode === "focus",
-      true,
-      terrainControlsDisabled
-    );
-    this.renderer.button(
-      this.layout.pillarButton,
-      this.pillarRenderMode === "round" ? "Pillars A: Round" : "Pillars B: Merge",
-      this.pillarRenderMode === "merge",
-      true,
-      terrainControlsDisabled
-    );
-    this.renderer.button(
-      this.layout.ridgeButton,
-      this.ridgeDirectionMode === "current" ? "Ridges A: Current" : "Ridges B: High cut",
-      this.ridgeDirectionMode === "high-cut",
-      true,
-      terrainControlsDisabled
-    );
-
-    const titleSize = Math.max(12, width * 0.025);
-    const guidanceSize = Math.max(9, width * 0.015);
-    const titleY = diagnosticY + diagnosticHeight + 6;
+    const titleSize = Math.max(12, Math.min(18, width * 0.025));
+    const guidanceSize = Math.max(9, Math.min(13, width * 0.015));
+    const titleY = 16 + buttonHeight + 5;
     const guidanceY = titleY + titleSize * 1.2 + 3;
     const statusY = guidanceY + guidanceSize * 1.45 + 8;
     this.layout.header = { titleY, guidanceY, statusY };
@@ -1506,7 +1463,13 @@ window.SceneManager = class SceneManager {
     textStyle(NORMAL);
     fill("#c9d9d8");
     textSize(guidanceSize);
-    text(this.tool === "brush" ? "Drag over soil carefully." : "Drag a shovel-load out, or flick it aside.", 16, guidanceY);
+    text(
+      this.tool === "brush" ? "Drag over soil carefully." : "Drag a shovel-load out, or flick it aside.",
+      16,
+      guidanceY,
+      width - 32,
+      guidanceSize * 1.4
+    );
   }
 
   drawExcavationGrid(trench, grid) {
@@ -1699,9 +1662,13 @@ window.SceneManager = class SceneManager {
   }
 
   gridCacheKey(trench, grid) {
+    const density = this.terrainRasterDensity();
     return [
       trench.id,
       trench.terrainRevision ?? trench.visualRevision ?? 0,
+      density,
+      Math.ceil(grid.width * density),
+      Math.ceil(grid.height * density),
       this.performanceMode,
       this.terrainSmoothingMode,
       this.pillarRenderMode,
@@ -1720,8 +1687,8 @@ window.SceneManager = class SceneManager {
       trench.rows,
       trench.columns,
       density,
-      cacheBounds.width.toFixed(2),
-      cacheBounds.height.toFixed(2)
+      Math.ceil(cacheBounds.width * density),
+      Math.ceil(cacheBounds.height * density)
     ].join(":");
   }
 
@@ -1751,7 +1718,8 @@ window.SceneManager = class SceneManager {
     } else {
       const topologyStartedAt = this.terrainTimingNow();
       const junctions = this.buildLocalJunctionDescriptors(surfaceField, trench, grid);
-      const regions = this.collectCompleteSurfaceRegions(surfaceField, trench, grid, junctions);
+      const patches = this.collectPixelSnappedSurfacePatches(surfaceField, trench, grid, junctions);
+      const regions = this.collectSurfaceRegionsFromPatches(patches);
       const preparedRegions = this.prepareSurfaceRegions(regions, trench);
       topologyDuration = this.terrainTimingNow() - topologyStartedAt;
       const ambientStartedAt = this.terrainTimingNow();
@@ -1760,7 +1728,16 @@ window.SceneManager = class SceneManager {
       ambientDuration = this.terrainTimingNow() - ambientStartedAt;
       const compositeStartedAt = this.terrainTimingNow();
       const patternGroups = this.buildTerrainPatternGroups(surfaceField, trench);
-      this.drawDepthCompositedTerrain(surfaceField, trench, grid, regions, ambientBuffer, preparedRegions, patternGroups);
+      this.drawDepthCompositedTerrain(
+        surfaceField,
+        trench,
+        grid,
+        regions,
+        ambientBuffer,
+        preparedRegions,
+        patternGroups,
+        patches
+      );
       compositeDuration = this.terrainTimingNow() - compositeStartedAt;
     }
     terrainContext.restore();
@@ -2141,10 +2118,45 @@ window.SceneManager = class SceneManager {
     context.closePath();
   }
 
+  terrainRasterDensity() {
+    if (this.currentTerrainRasterDensity) return this.currentTerrainRasterDensity;
+    return typeof pixelDensity === "function" ? Math.max(1, pixelDensity()) : 1;
+  }
+
+  snapTerrainCoordinate(value, density = this.terrainRasterDensity()) {
+    return Math.round(value * density) / density;
+  }
+
+  terrainPatchBounds(vertexX, vertexY, trench, grid, density = this.terrainRasterDensity()) {
+    const snap = (value) => this.snapTerrainCoordinate(value, density);
+    const gridLeft = Math.floor(grid.x * density) / density;
+    const gridTop = Math.floor(grid.y * density) / density;
+    const gridRight = Math.ceil((grid.x + grid.width) * density) / density;
+    const gridBottom = Math.ceil((grid.y + grid.height) * density) / density;
+    const centerX = vertexX === 0
+      ? gridLeft
+      : vertexX === trench.columns
+        ? gridRight
+        : snap(grid.x + vertexX * grid.cellSize);
+    const centerY = vertexY === 0
+      ? gridTop
+      : vertexY === trench.rows
+        ? gridBottom
+        : snap(grid.y + vertexY * grid.cellSize);
+    return {
+      left: vertexX === 0 ? gridLeft : snap(grid.x + (vertexX - 0.5) * grid.cellSize),
+      top: vertexY === 0 ? gridTop : snap(grid.y + (vertexY - 0.5) * grid.cellSize),
+      right: vertexX === trench.columns ? gridRight : snap(grid.x + (vertexX + 0.5) * grid.cellSize),
+      bottom: vertexY === trench.rows ? gridBottom : snap(grid.y + (vertexY + 0.5) * grid.cellSize),
+      centerX,
+      centerY
+    };
+  }
+
   drawLocalJunctions(field, trench, grid) {
     const descriptors = this.buildLocalJunctionDescriptors(field, trench, grid);
-    const regions = this.collectJunctionSurfaceRegions(descriptors);
-    this.drawBatchedJunctionSurfaces(regions, trench);
+    const patches = this.collectPixelSnappedSurfacePatches(field, trench, grid, descriptors);
+    this.drawPixelSnappedSurfacePatches(patches);
     return descriptors;
   }
 
@@ -2167,16 +2179,7 @@ window.SceneManager = class SceneManager {
         const groups = this.junctionGroups(samples);
         if (!this.shouldSmoothJunction(samples, groups)) continue;
         const owner = this.chooseJunctionOwner(groups, trench);
-        const centerX = grid.x + x * grid.cellSize;
-        const centerY = grid.y + y * grid.cellSize;
-        const bounds = {
-          left: centerX - logicalSpan,
-          top: centerY - logicalSpan,
-          right: centerX + logicalSpan,
-          bottom: centerY + logicalSpan,
-          centerX,
-          centerY
-        };
+        const bounds = this.terrainPatchBounds(x, y, trench, grid);
         const lobes = [];
         samples.forEach((sample, index) => {
           if (sample.surface.signature === owner.signature) return;
@@ -2194,29 +2197,6 @@ window.SceneManager = class SceneManager {
       }
     }
     return descriptors;
-  }
-
-  collectJunctionSurfaceRegions(junctions) {
-    const regions = new Map();
-    const regionFor = (surface) => {
-      if (!regions.has(surface.signature)) {
-        regions.set(surface.signature, {
-          signature: surface.signature,
-          surface,
-          ownerPatches: [],
-          positiveLobes: []
-        });
-      }
-      return regions.get(surface.signature);
-    };
-
-    junctions.forEach((junction) => {
-      regionFor(junction.owner).ownerPatches.push({ bounds: junction.bounds, holes: junction.lobes });
-      junction.lobes.forEach((lobe) => {
-        regionFor(lobe.surface).positiveLobes.push({ bounds: junction.bounds, corner: lobe.corner });
-      });
-    });
-    return regions;
   }
 
   surfaceRegionFor(regions, surface) {
@@ -2237,47 +2217,100 @@ window.SceneManager = class SceneManager {
     this.surfaceRegionFor(regions, surface).rectangles.push({ left, top, right, bottom });
   }
 
-  collectCompleteSurfaceRegions(field, trench, grid, junctions) {
-    const regions = new Map();
+  collectPixelSnappedSurfacePatches(field, trench, grid, junctions, density = this.terrainRasterDensity()) {
+    const patches = [];
     const descriptors = new Map(junctions.map((junction) => [`${junction.x}:${junction.y}`, junction]));
-    const halfCell = grid.cellSize * 0.5;
+    const addPiece = (pieces, surface, left, top, right, bottom) => {
+      if (!surface || right - left <= 0.001 || bottom - top <= 0.001) return;
+      pieces.push({ surface, bounds: { left, top, right, bottom } });
+    };
 
     for (let vertexY = 0; vertexY <= trench.rows; vertexY += 1) {
       for (let vertexX = 0; vertexX <= trench.columns; vertexX += 1) {
-        const centerX = grid.x + vertexX * grid.cellSize;
-        const centerY = grid.y + vertexY * grid.cellSize;
-        const bounds = {
-          left: Math.max(grid.x, centerX - halfCell),
-          top: Math.max(grid.y, centerY - halfCell),
-          right: Math.min(grid.x + grid.width, centerX + halfCell),
-          bottom: Math.min(grid.y + grid.height, centerY + halfCell),
-          centerX,
-          centerY
-        };
+        const bounds = this.terrainPatchBounds(vertexX, vertexY, trench, grid, density);
         const descriptor = descriptors.get(`${vertexX}:${vertexY}`);
         if (descriptor) {
-          this.surfaceRegionFor(regions, descriptor.owner).ownerPatches.push({ bounds, holes: descriptor.lobes });
-          descriptor.lobes.forEach((lobe) => {
-            this.surfaceRegionFor(regions, lobe.surface).positiveLobes.push({ bounds, corner: lobe.corner });
+          patches.push({
+            x: vertexX,
+            y: vertexY,
+            bounds,
+            owner: descriptor.owner,
+            lobes: descriptor.lobes,
+            pieces: null,
+            smoothed: true
           });
           continue;
         }
 
+        const pieces = [];
         if (vertexX > 0 && vertexY > 0) {
-          this.addSurfaceRectangle(regions, field[vertexY - 1][vertexX - 1], bounds.left, bounds.top, centerX, centerY);
+          addPiece(pieces, field[vertexY - 1][vertexX - 1], bounds.left, bounds.top, bounds.centerX, bounds.centerY);
         }
         if (vertexX < trench.columns && vertexY > 0) {
-          this.addSurfaceRectangle(regions, field[vertexY - 1][vertexX], centerX, bounds.top, bounds.right, centerY);
+          addPiece(pieces, field[vertexY - 1][vertexX], bounds.centerX, bounds.top, bounds.right, bounds.centerY);
         }
         if (vertexX < trench.columns && vertexY < trench.rows) {
-          this.addSurfaceRectangle(regions, field[vertexY][vertexX], centerX, centerY, bounds.right, bounds.bottom);
+          addPiece(pieces, field[vertexY][vertexX], bounds.centerX, bounds.centerY, bounds.right, bounds.bottom);
         }
         if (vertexX > 0 && vertexY < trench.rows) {
-          this.addSurfaceRectangle(regions, field[vertexY][vertexX - 1], bounds.left, centerY, centerX, bounds.bottom);
+          addPiece(pieces, field[vertexY][vertexX - 1], bounds.left, bounds.centerY, bounds.centerX, bounds.bottom);
         }
+        patches.push({ x: vertexX, y: vertexY, bounds, pieces, smoothed: false });
       }
     }
+    return patches;
+  }
+
+  drawPixelSnappedSurfacePatches(patches, context = drawingContext) {
+    context.save();
+    patches.forEach((patch) => {
+      if (patch.smoothed) {
+        context.fillStyle = patch.owner.renderColour || patch.owner.layer.colour;
+        context.fillRect(
+          patch.bounds.left,
+          patch.bounds.top,
+          patch.bounds.right - patch.bounds.left,
+          patch.bounds.bottom - patch.bounds.top
+        );
+        patch.lobes.forEach((lobe) => {
+          context.beginPath();
+          this.appendCornerLobePath(context, lobe.corner, patch.bounds);
+          context.fillStyle = lobe.surface.renderColour || lobe.surface.layer.colour;
+          context.fill();
+        });
+        return;
+      }
+      patch.pieces.forEach((piece) => {
+        const bounds = piece.bounds;
+        context.fillStyle = piece.surface.renderColour || piece.surface.layer.colour;
+        context.fillRect(bounds.left, bounds.top, bounds.right - bounds.left, bounds.bottom - bounds.top);
+      });
+    });
+    context.restore();
+  }
+
+  collectSurfaceRegionsFromPatches(patches) {
+    const regions = new Map();
+    patches.forEach((patch) => {
+      if (patch.smoothed) {
+        this.surfaceRegionFor(regions, patch.owner).ownerPatches.push({ bounds: patch.bounds, holes: patch.lobes });
+        patch.lobes.forEach((lobe) => {
+          this.surfaceRegionFor(regions, lobe.surface).positiveLobes.push({ bounds: patch.bounds, corner: lobe.corner });
+        });
+        return;
+      }
+      patch.pieces.forEach((piece) => {
+        const bounds = piece.bounds;
+        this.addSurfaceRectangle(regions, piece.surface, bounds.left, bounds.top, bounds.right, bounds.bottom);
+      });
+    });
     return regions;
+  }
+
+  collectCompleteSurfaceRegions(field, trench, grid, junctions) {
+    return this.collectSurfaceRegionsFromPatches(
+      this.collectPixelSnappedSurfacePatches(field, trench, grid, junctions)
+    );
   }
 
   appendSurfaceRegionPath(context, region) {
@@ -2322,40 +2355,6 @@ window.SceneManager = class SceneManager {
       ordered,
       byDepth: [...byDepth.values()].sort((first, second) => second.depth - first.depth)
     };
-  }
-
-  drawSurfaceRegion(region, context = drawingContext) {
-    context.fillStyle = region.surface.renderColour || region.surface.layer.colour;
-    if (region.compiledPath) {
-      context.fill(region.compiledPath, "evenodd");
-    } else {
-      context.beginPath();
-      this.appendSurfaceRegionPath(context, region);
-      context.fill("evenodd");
-    }
-  }
-
-  drawBatchedJunctionSurfaces(regions, trench, context = drawingContext) {
-    const layerOrder = new Map(this.terrainLayers(trench).map((layer, index) => [layer.id, index]));
-    const orderedRegions = [...regions.values()].sort((first, second) =>
-      second.surface.depth - first.surface.depth ||
-      (layerOrder.get(first.surface.layer.id) ?? 99) - (layerOrder.get(second.surface.layer.id) ?? 99) ||
-      first.signature.localeCompare(second.signature)
-    );
-
-    context.save();
-    orderedRegions.forEach((region) => {
-      context.beginPath();
-      region.ownerPatches.forEach((patch) => {
-        const { bounds } = patch;
-        context.rect(bounds.left, bounds.top, bounds.right - bounds.left, bounds.bottom - bounds.top);
-        patch.holes.forEach((hole) => this.appendCornerLobePath(context, hole.corner, bounds));
-      });
-      region.positiveLobes.forEach((lobe) => this.appendCornerLobePath(context, lobe.corner, lobe.bounds));
-      context.fillStyle = region.surface.renderColour || region.surface.layer.colour;
-      context.fill("evenodd");
-    });
-    context.restore();
   }
 
   cornerBoundary(corner, bounds) {
@@ -2577,7 +2576,7 @@ window.SceneManager = class SceneManager {
   }
 
   ensureAmbientBuffer(grid) {
-    const density = typeof pixelDensity === "function" ? pixelDensity() : 1;
+    const density = this.terrainRasterDensity();
     const pixelWidth = Math.max(1, Math.ceil(grid.width * density));
     const pixelHeight = Math.max(1, Math.ceil(grid.height * density));
     if (!this.ambientBuffer ||
@@ -2632,25 +2631,31 @@ window.SceneManager = class SceneManager {
     return buffer;
   }
 
-  drawDepthCompositedTerrain(field, trench, grid, regions, ambientBuffer, preparedRegions = null, patternGroups = null) {
+  drawDepthCompositedTerrain(
+    field,
+    trench,
+    grid,
+    regions,
+    ambientBuffer,
+    preparedRegions = null,
+    patternGroups = null,
+    patches = null
+  ) {
     const context = drawingContext;
-    const prepared = preparedRegions || this.prepareSurfaceRegions(regions, trench);
     const patterns = patternGroups || this.buildTerrainPatternGroups(field, trench);
-    prepared.byDepth.forEach((depthGroup) => {
-      depthGroup.regions.forEach((region) => this.drawSurfaceRegion(region, context));
-      this.drawTerrainPatterns(field, trench, grid, depthGroup.depth, patterns);
-      if (!ambientBuffer) return;
+    const surfacePatches = patches || this.collectPixelSnappedSurfacePatches(
+      field,
+      trench,
+      grid,
+      this.buildLocalJunctionDescriptors(field, trench, grid)
+    );
+    this.drawPixelSnappedSurfacePatches(surfacePatches, context);
+    this.drawTerrainPatterns(field, trench, grid, null, patterns, context);
+    if (ambientBuffer) {
       context.save();
-      if (depthGroup.compiledPath) {
-        context.clip(depthGroup.compiledPath, "evenodd");
-      } else {
-        context.beginPath();
-        depthGroup.regions.forEach((region) => this.appendSurfaceRegionPath(context, region));
-        context.clip("evenodd");
-      }
       context.drawImage(ambientBuffer.canvas, grid.x, grid.y, grid.width, grid.height);
       context.restore();
-    });
+    }
   }
 
   drawDepthDebug(trench, grid) {
@@ -2671,17 +2676,148 @@ window.SceneManager = class SceneManager {
     textStyle(NORMAL);
   }
 
-  diagnosticButtonLayout(totalWidth, y, buttonHeight, gap = 6) {
-    const usableWidth = totalWidth - 24 - gap * 4;
-    const depthWidth = usableWidth * 0.13;
-    const performanceWidth = usableWidth * 0.18;
-    const comparisonWidth = (usableWidth - depthWidth - performanceWidth) / 3;
-    const depth = { x: 12, y, width: depthWidth, height: buttonHeight };
-    const performance = { x: depth.x + depth.width + gap, y, width: performanceWidth, height: buttonHeight };
-    const smoothing = { x: performance.x + performance.width + gap, y, width: comparisonWidth, height: buttonHeight };
-    const pillar = { x: smoothing.x + smoothing.width + gap, y, width: comparisonWidth, height: buttonHeight };
-    const ridge = { x: pillar.x + pillar.width + gap, y, width: comparisonWidth, height: buttonHeight };
-    return { depth, performance, smoothing, pillar, ridge };
+  debugMenuLayout() {
+    const buttonSize = 44;
+    const margin = 6;
+    const button = {
+      x: width - buttonSize - margin,
+      y: height - buttonSize - margin,
+      width: buttonSize,
+      height: buttonSize
+    };
+    if (!this.debugMenuOpen) return { button, panel: null, options: [] };
+    const panelWidth = Math.min(340, width - 24);
+    const panelHeight = Math.min(236, height - 68);
+    const panel = {
+      x: Math.max(12, width - panelWidth - 12),
+      y: Math.max(12, button.y - panelHeight - 6),
+      width: panelWidth,
+      height: panelHeight
+    };
+    const definitions = [
+      { id: "depth", label: this.showDepthDebug ? "Depths: On" : "Depths: Off" },
+      { id: "performance", label: this.performanceMode === "full" ? "Performance: Full" : "Performance: Lite" },
+      { id: "smoothing", label: this.terrainSmoothingMode === "all" ? "Smooth A: All" : "Smooth B: Focus", disabled: this.performanceMode === "lite" },
+      { id: "pillar", label: this.pillarRenderMode === "round" ? "Pillars A: Round" : "Pillars B: Merge", disabled: this.performanceMode === "lite" },
+      { id: "ridge", label: this.ridgeDirectionMode === "current" ? "Ridges A: Current" : "Ridges B: High cut", disabled: this.performanceMode === "lite" },
+      { id: "water", label: this.bucketOcclusionMode === "obscured" ? "Water B: Obscured" : "Water A: Visible" }
+    ];
+    const inset = 10;
+    const gap = 6;
+    const top = panel.y + 34;
+    const footerHeight = 28;
+    const rowHeight = Math.max(34, (panel.height - 34 - footerHeight - inset - gap * 2) / 3);
+    const columnWidth = (panel.width - inset * 2 - gap) / 2;
+    const options = definitions.map((entry, index) => ({
+      ...entry,
+      bounds: {
+        x: panel.x + inset + (index % 2) * (columnWidth + gap),
+        y: top + Math.floor(index / 2) * (rowHeight + gap),
+        width: columnWidth,
+        height: rowHeight
+      }
+    }));
+    return { button, panel, options };
+  }
+
+  drawDebugMenu() {
+    const debug = this.debugMenuLayout();
+    this.layout.debugButton = debug.button;
+    this.layout.debugPanel = debug.panel;
+    this.layout.debugOptions = debug.options;
+    if (debug.panel) {
+      this.renderer.panel(debug.panel.x, debug.panel.y, debug.panel.width, debug.panel.height, "#d9cdb1");
+      fill("#25444a");
+      noStroke();
+      textAlign(LEFT, TOP);
+      textStyle(BOLD);
+      textSize(Math.max(11, Math.min(15, debug.panel.width * 0.045)));
+      text("DEBUG CONTROLS", debug.panel.x + 11, debug.panel.y + 9);
+      textStyle(NORMAL);
+      debug.options.forEach((option) => {
+        this.renderer.button(
+          option.bounds,
+          option.label,
+          ["depth", "performance", "smoothing", "pillar", "ridge", "water"].some((id) => id === option.id && (
+            (id === "depth" && this.showDepthDebug) ||
+            (id === "performance" && this.performanceMode === "lite") ||
+            (id === "smoothing" && this.terrainSmoothingMode === "focus") ||
+            (id === "pillar" && this.pillarRenderMode === "merge") ||
+            (id === "ridge" && this.ridgeDirectionMode === "high-cut") ||
+            (id === "water" && this.bucketOcclusionMode === "obscured")
+          )),
+          true,
+          option.disabled,
+          { minimumSize: 7.5, maximumSize: 11 }
+        );
+      });
+      fill("#40585c");
+      textAlign(LEFT, BOTTOM);
+      textSize(Math.max(7.5, Math.min(10, debug.panel.width * 0.03)));
+      text(this.debugMessage, debug.panel.x + 11, debug.panel.y + debug.panel.height - 7, debug.panel.width - 22, 22);
+    }
+
+    const centerX = debug.button.x + debug.button.width / 2;
+    const centerY = debug.button.y + debug.button.height / 2;
+    stroke(this.debugMenuOpen ? "#f4b942" : "#8fa6a5");
+    strokeWeight(this.debugMenuOpen ? 2.5 : 1.5);
+    fill("#173843");
+    circle(centerX, centerY, 26);
+    noStroke();
+    fill(this.debugMenuOpen ? "#f4b942" : "#d5dfdc");
+    textAlign(CENTER, CENTER);
+    textStyle(BOLD);
+    textSize(17);
+    text(this.debugMenuOpen ? "×" : "•••", centerX, centerY - (this.debugMenuOpen ? 1 : 3));
+    textStyle(NORMAL);
+  }
+
+  activateDebugOption(id) {
+    if (id === "depth") {
+      this.showDepthDebug = !this.showDepthDebug;
+      this.debugMessage = this.showDepthDebug ? "Depth labels enabled." : "Depth labels hidden.";
+    } else if (id === "performance") {
+      this.performanceMode = this.performanceMode === "full" ? "lite" : "full";
+      this.invalidateTerrainCache({ releaseAmbient: true });
+      this.trimEffectsForMode();
+      this.debugMessage = this.performanceMode === "lite"
+        ? "Lite uses simple cells and edge shading."
+        : "Full restores smoothed terrain and curved shadows.";
+    } else if (id === "smoothing") {
+      this.terrainSmoothingMode = this.terrainSmoothingMode === "all" ? "focus" : "all";
+      this.invalidateTerrainCache();
+      this.debugMessage = this.terrainSmoothingMode === "all" ? "All junctions are smoothed." : "Only focused features are smoothed.";
+    } else if (id === "pillar") {
+      this.pillarRenderMode = this.pillarRenderMode === "round" ? "merge" : "round";
+      this.invalidateTerrainCache();
+      this.debugMessage = this.pillarRenderMode === "round" ? "Small features remain rounded." : "Isolated extrema merge visually.";
+    } else if (id === "ridge") {
+      this.ridgeDirectionMode = this.ridgeDirectionMode === "current" ? "high-cut" : "current";
+      this.invalidateTerrainCache();
+      this.debugMessage = this.ridgeDirectionMode === "high-cut" ? "Shallower ridges are cut inward." : "Original ridge ownership restored.";
+    } else if (id === "water") {
+      this.bucketOcclusionMode = this.bucketOcclusionMode === "obscured" ? "visible" : "obscured";
+      this.debugMessage = this.bucketOcclusionMode === "obscured" ? "Bucket foreground obscures immersed finds." : "Immersed finds remain visible.";
+    }
+  }
+
+  handleDebugPointerStart(x, y) {
+    if (this.layout.debugButton && this.pointIn(this.layout.debugButton, x, y)) {
+      this.debugMenuOpen = !this.debugMenuOpen;
+      this.requestFrame();
+      return true;
+    }
+    if (!this.debugMenuOpen) return false;
+    const option = (this.layout.debugOptions || []).find((entry) => this.pointIn(entry.bounds, x, y));
+    if (option) {
+      if (option.disabled) this.debugMessage = "Switch Performance to Full before changing this terrain option.";
+      else this.activateDebugOption(option.id);
+      this.requestFrame();
+      return true;
+    }
+    this.debugMenuOpen = false;
+    this.requestFrame();
+    return true;
   }
 
   profileCacheBounds(profile) {
@@ -2784,8 +2920,8 @@ window.SceneManager = class SceneManager {
 
   drawProfile(trench, profile) {
     this.renderer.panel(profile.x, profile.y, profile.width, profile.height, "#e8dcc2");
-    const titleHeight = Math.max(30, Math.min(42, profile.height * 0.22));
-    const keyWidth = Math.max(94, profile.width * (this.layout.isPortrait ? 0.34 : 0.38));
+    const titleHeight = this.layout.isPortrait ? Math.max(14, Math.min(18, profile.height * 0.2)) : Math.max(30, Math.min(42, profile.height * 0.22));
+    const keyWidth = Math.max(this.layout.isPortrait ? 82 : 94, profile.width * (this.layout.isPortrait ? 0.3 : 0.38));
     const diagram = {
       x: profile.x + 6,
       y: profile.y + titleHeight + 4,
@@ -2805,7 +2941,7 @@ window.SceneManager = class SceneManager {
     noStroke();
     textAlign(LEFT, TOP);
     textStyle(BOLD);
-    textSize(Math.max(12, Math.min(24, titleHeight * 0.64)));
+    textSize(this.layout.isPortrait ? Math.max(8, Math.min(11, titleHeight * 0.64)) : Math.max(12, Math.min(24, titleHeight * 0.64)));
     text("PROFILE", profile.x + 7, profile.y + Math.max(4, titleHeight * 0.12));
     textStyle(NORMAL);
 
@@ -3092,22 +3228,35 @@ window.SceneManager = class SceneManager {
     fill("#fff9e9");
     textAlign(LEFT, TOP);
     textStyle(BOLD);
-    textSize(Math.max(8, Math.min(12, inventory.height * 0.29)));
-    text(`FINDS ${collected.length}/${trench.artefacts.length}`, inventory.x, inventory.y + 2);
+    const labelSize = Math.max(8, Math.min(12, inventory.height * 0.29));
+    const label = `FINDS ${collected.length}/${trench.artefacts.length}`;
+    textSize(labelSize);
+    text(label, inventory.x, inventory.y + 2);
+    const labelWidth = textWidth(label);
     textStyle(NORMAL);
-    const itemSize = Math.max(9, Math.min(15, inventory.height * 0.35));
-    const itemGap = Math.max(itemSize + 4, inventory.width / Math.max(1, Math.min(3, collected.length)));
-    collected.slice(0, 3).forEach((artefact, index) => {
-      const itemX = inventory.x + itemSize / 2 + index * itemGap;
-      const itemY = inventory.y + inventory.height - itemSize / 2 - 1;
+    if (!collected.length) return;
+    const itemSize = Math.max(10, Math.min(17, inventory.height * 0.46));
+    const gap = Math.max(3, itemSize * 0.24);
+    const startX = inventory.x + labelWidth + gap + itemSize / 2;
+    const availableWidth = inventory.x + inventory.width - startX + itemSize / 2;
+    const slotCapacity = Math.max(0, Math.floor((availableWidth + gap) / (itemSize + gap)));
+    const showOverflow = slotCapacity < collected.length && slotCapacity > 0;
+    const iconCapacity = showOverflow ? slotCapacity - 1 : slotCapacity;
+    const visible = collected.slice(0, Math.min(6, iconCapacity));
+    const itemY = inventory.y + inventory.height / 2 + 1;
+    visible.forEach((artefact, index) => {
+      const itemX = startX + index * (itemSize + gap);
       this.renderer.artefact(artefact, itemX, itemY, itemSize, { collected: true });
-      if (inventory.width >= 150) {
-        fill("#c9d9d8");
-        textAlign(CENTER, TOP);
-        textSize(7);
-        text(artefact.label.split(" ")[0], itemX, inventory.y + inventory.height + 1);
-      }
     });
+    const hidden = collected.length - visible.length;
+    if (hidden > 0 && showOverflow) {
+      fill("#c9d9d8");
+      textAlign(CENTER, CENTER);
+      textStyle(BOLD);
+      textSize(Math.max(7, Math.min(10, itemSize * 0.62)));
+      text(`+${hidden}`, startX + visible.length * (itemSize + gap), itemY);
+      textStyle(NORMAL);
+    }
   }
 
   drawMessage() {
@@ -3115,8 +3264,9 @@ window.SceneManager = class SceneManager {
     const messageY = this.layout.header?.statusY ?? Math.max(60, this.layout.grid.y - 9);
     fill(this.messageTone === "warning" ? "#ffd889" : "#d9eee2");
     textAlign(LEFT, CENTER);
-    textSize(Math.max(9, width * 0.015));
-    text(this.message, 16, messageY);
+    const messageSize = Math.max(9, Math.min(13, width * 0.015));
+    textSize(messageSize);
+    text(this.message, 16, messageY, width - 32, messageSize * 1.5);
   }
 
   hitMapTile(x, y) {
@@ -3290,6 +3440,34 @@ window.SceneManager = class SceneManager {
     };
   }
 
+  bucketInnerBoundsAtY(y, itemSize = 0) {
+    const geometry = this.layout.bucketGeometry;
+    if (!geometry) return null;
+    const travel = Math.max(1, geometry.bodyBottom - geometry.waterY);
+    const amount = Math.max(0, Math.min(1, (y - geometry.waterY) / travel));
+    const wallHalfWidth = geometry.bucketWidth * (0.46 + (0.37 - 0.46) * amount);
+    const wallInset = Math.max(3, geometry.bucketWidth * 0.025);
+    const artefactHalfWidth = itemSize * 0.58;
+    const horizontalRoom = Math.max(0, wallHalfWidth - wallInset - artefactHalfWidth);
+    return {
+      left: geometry.centerX - horizontalRoom,
+      right: geometry.centerX + horizontalRoom,
+      maximumY: geometry.bodyBottom - itemSize * 0.62 - Math.max(3, itemSize * 0.03)
+    };
+  }
+
+  constrainCleaningImmersionPoint(action, rawX, rawY) {
+    if (action?.type !== "cleaning-item" || !this.layout.bucketGeometry) return { x: rawX, y: rawY };
+    const size = action.displaySize || this.cleaningItemBaseSize() * 1.08;
+    const initialBounds = this.bucketInnerBoundsAtY(rawY, size);
+    const y = Math.min(rawY, initialBounds.maximumY);
+    const bounds = this.bucketInnerBoundsAtY(y, size);
+    return {
+      x: Math.max(bounds.left, Math.min(bounds.right, rawX)),
+      y
+    };
+  }
+
   updateCleaningDragPosition(action, rawX, rawY) {
     if (action?.type !== "cleaning-item") return;
     action.rawX = rawX;
@@ -3297,10 +3475,9 @@ window.SceneManager = class SceneManager {
     action.x = rawX;
     action.y = rawY;
     if (action.dunkPhase !== "immersed" || !this.layout.bucketGeometry) return;
-    const item = this.cleaningDraggedItemBounds(action);
-    const bottomInset = Math.max(3, item.size * 0.03);
-    const maximumY = this.layout.bucketGeometry.bodyBottom - item.size * 0.62 - bottomInset;
-    action.y = Math.min(rawY, maximumY);
+    const constrained = this.constrainCleaningImmersionPoint(action, rawX, rawY);
+    action.x = constrained.x;
+    action.y = constrained.y;
   }
 
   segmentEllipseCrossings(bounds, start, end) {
@@ -3364,11 +3541,14 @@ window.SceneManager = class SceneManager {
   advanceCleaningDunk(action, start, end) {
     const aperture = this.layout.bucketDunkAperture || this.layout.bucketWater;
     if (!aperture || action.artefact.cleaning.status === "ready-to-return") return;
+    const wasImmersed = action.dunkPhase === "immersed";
+    const gestureStart = wasImmersed ? this.constrainCleaningImmersionPoint(action, start.x, start.y) : start;
+    const gestureEnd = wasImmersed ? this.constrainCleaningImmersionPoint(action, end.x, end.y) : end;
     const centerY = aperture.y + aperture.height / 2;
-    const movingDown = end.y > start.y;
-    const verticalMotion = Math.abs((end.y - start.y) / Math.max(1, aperture.height))
-      >= Math.abs((end.x - start.x) / Math.max(1, aperture.width));
-    const crossings = this.segmentEllipseCrossings(aperture, start, end);
+    const movingDown = gestureEnd.y > gestureStart.y;
+    const verticalMotion = Math.abs((gestureEnd.y - gestureStart.y) / Math.max(1, aperture.height))
+      >= Math.abs((gestureEnd.x - gestureStart.x) / Math.max(1, aperture.width));
+    const crossings = this.segmentEllipseCrossings(aperture, gestureStart, gestureEnd);
 
     crossings.forEach((crossing) => {
       const upperBoundary = crossing.y <= centerY + 1e-5;
@@ -3387,15 +3567,16 @@ window.SceneManager = class SceneManager {
         action.dunkPhase = "armed";
         const result = this.cleaningModel.handwashDunk(action.artefact, action.artefact.cleaning.activeFace);
         this.handleHandwashResult(result, action);
-      } else if (action.dunkPhase === "immersed" && !upperBoundary && movingDown && verticalMotion) {
-        // Keep a valid dunk immersed when the raw pointer overshoots below the opening.
+      } else if (action.dunkPhase === "immersed") {
+        // The solid bucket wall retains a valid immersion during lower or
+        // sideways overshoot. Only an upward upper-rim crossing completes it.
       } else {
         action.dunkPhase = "unarmed";
       }
     });
 
-    const endsInside = this.pointInEllipse(aperture, end.x, end.y);
-    if (action.dunkPhase !== "immersed" && !endsInside && end.y < centerY) action.dunkPhase = "armed";
+    const endsInside = this.pointInEllipse(aperture, gestureEnd.x, gestureEnd.y);
+    if (action.dunkPhase !== "immersed" && !endsInside && gestureEnd.y < centerY) action.dunkPhase = "armed";
   }
 
   cleaningPointerStart(x, y) {
@@ -3426,15 +3607,6 @@ window.SceneManager = class SceneManager {
     }
     if (this.layout.inventoryViewButton && this.pointIn(this.layout.inventoryViewButton, x, y)) {
       this.cleaningInventoryChooserOpen = true;
-      redraw();
-      return;
-    }
-    if (this.layout.bucketModeButton && this.pointIn(this.layout.bucketModeButton, x, y)) {
-      this.bucketOcclusionMode = this.bucketOcclusionMode === "obscured" ? "visible" : "obscured";
-      this.message = this.bucketOcclusionMode === "obscured"
-        ? "Water B hides the submerged part behind the bucket front."
-        : "Water A keeps the immersed find fully visible.";
-      this.messageTone = "neutral";
       redraw();
       return;
     }
@@ -3703,6 +3875,7 @@ window.SceneManager = class SceneManager {
       this.tapFeedback = { x, y, startedAt: this.interactionNow(), duration: 180 };
       this.scheduleEffectFrame();
     }
+    if (this.handleDebugPointerStart(x, y)) return;
     if (this.currentScene === "site") {
       if (this.layout.labButton && this.pointIn(this.layout.labButton, x, y)) {
         this.enterCleaningLab();
@@ -3743,66 +3916,6 @@ window.SceneManager = class SceneManager {
       redraw();
       return;
     }
-    if (this.pointIn(this.layout.depthButton, x, y)) {
-      this.showDepthDebug = !this.showDepthDebug;
-      this.message = this.showDepthDebug ? "Depth debug enabled." : "Depth debug hidden.";
-      this.messageTone = "neutral";
-      redraw();
-      return;
-    }
-    if (this.layout.performanceButton && this.pointIn(this.layout.performanceButton, x, y)) {
-      this.performanceMode = this.performanceMode === "full" ? "lite" : "full";
-      this.invalidateTerrainCache({ releaseAmbient: true });
-      this.trimEffectsForMode();
-      this.message = this.performanceMode === "lite"
-        ? "Performance Lite uses simple cells and edge shading."
-        : "Performance Full restores smoothed terrain and curved shadows.";
-      this.messageTone = "neutral";
-      redraw();
-      return;
-    }
-    const disabledTerrainControl = this.performanceMode === "lite" && [
-      this.layout.smoothingButton,
-      this.layout.pillarButton,
-      this.layout.ridgeButton
-    ].some((button) => button && this.pointIn(button, x, y));
-    if (disabledTerrainControl) {
-      this.message = "Switch Performance back to Full to change terrain smoothing options.";
-      this.messageTone = "neutral";
-      redraw();
-      return;
-    }
-    if (this.pointIn(this.layout.smoothingButton, x, y)) {
-      this.terrainSmoothingMode = this.terrainSmoothingMode === "all" ? "focus" : "all";
-      this.invalidateTerrainCache();
-      this.message = this.terrainSmoothingMode === "all"
-        ? "Smoothing A applies to every terrain junction."
-        : "Smoothing B focuses on diagonals and small features.";
-      this.messageTone = "neutral";
-      redraw();
-      return;
-    }
-    if (this.pointIn(this.layout.pillarButton, x, y)) {
-      this.pillarRenderMode = this.pillarRenderMode === "round" ? "merge" : "round";
-      this.invalidateTerrainCache();
-      this.message = this.pillarRenderMode === "round"
-        ? "Pillars A keeps small features as rounded islands."
-        : "Pillars B visually merges isolated height extrema.";
-      this.messageTone = "neutral";
-      redraw();
-      return;
-    }
-    if (this.pointIn(this.layout.ridgeButton, x, y)) {
-      this.ridgeDirectionMode = this.ridgeDirectionMode === "current" ? "high-cut" : "current";
-      this.invalidateTerrainCache();
-      this.message = this.ridgeDirectionMode === "high-cut"
-        ? "Ridges B cuts rounded edges into shallower terrain."
-        : "Ridges A uses the original terrain ownership direction.";
-      this.messageTone = "neutral";
-      redraw();
-      return;
-    }
-
     const cell = this.cellAt(x, y);
     if (!cell) return;
     const collected = this.activeTrench.collectAt(cell.x, cell.y);

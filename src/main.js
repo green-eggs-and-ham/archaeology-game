@@ -1,5 +1,6 @@
 let sceneManager;
 let firstFramePresented = false;
+let activeCanvasDensity = 1;
 
 function getCanvasSize() {
   const shell = document.getElementById("game-shell");
@@ -20,12 +21,24 @@ function getCanvasSize() {
   };
 }
 
+function getCanvasPixelDensity(size) {
+  const canvasConfig = window.GameConfig.canvas;
+  const deviceDensity = Math.max(1, window.devicePixelRatio || 1);
+  const compactDensity = Math.min(deviceDensity, canvasConfig.compactPixelDensity || 2);
+  const isCompactViewport = window.innerWidth <= canvasConfig.compactBreakpoint;
+  const pixelBudget = canvasConfig.maxCompactCanvasPixels || 1300000;
+  return isCompactViewport && size.width * size.height * compactDensity * compactDensity <= pixelBudget
+    ? compactDensity
+    : 1;
+}
+
 function setup() {
   const size = getCanvasSize();
+  activeCanvasDensity = getCanvasPixelDensity(size);
+  pixelDensity(activeCanvasDensity);
   const canvas = createCanvas(size.width, size.height);
   canvas.parent("game-shell");
   canvas.elt.setAttribute("aria-label", "Archaeology excavation and artefact cleaning game");
-  pixelDensity(1);
   noLoop();
 
   sceneManager = new window.SceneManager(window.GameConfig);
@@ -92,6 +105,11 @@ function draw() {
 
 function windowResized() {
   const size = getCanvasSize();
+  const nextDensity = getCanvasPixelDensity(size);
+  if (nextDensity !== activeCanvasDensity) {
+    activeCanvasDensity = nextDensity;
+    pixelDensity(activeCanvasDensity);
+  }
   resizeCanvas(size.width, size.height);
   sceneManager.handleResize();
   redraw();

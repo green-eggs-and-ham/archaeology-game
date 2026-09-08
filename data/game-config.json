@@ -1,6 +1,6 @@
 {
   "title": "Archaeology Game",
-  "canvas": { "aspectRatio": "16:9", "compactAspectRatio": "4:3", "portraitAspectRatio": "3:4", "compactBreakpoint": 640, "maxWidth": 1280 },
+  "canvas": { "aspectRatio": "16:9", "compactAspectRatio": "4:3", "portraitAspectRatio": "3:4", "compactBreakpoint": 640, "compactPixelDensity": 2, "maxCompactCanvasPixels": 1300000, "maxWidth": 1280 },
   "map": { "columns": 3, "rows": 3 },
   "trench": {
     "columns": 20,

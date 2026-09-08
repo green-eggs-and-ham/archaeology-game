@@ -4,6 +4,8 @@ window.GameConfig = {
     compactAspectRatio: 4 / 3,
     portraitAspectRatio: 3 / 4,
     compactBreakpoint: 640,
+    compactPixelDensity: 2,
+    maxCompactCanvasPixels: 1300000,
     maxWidth: 1280
   },
   map: {

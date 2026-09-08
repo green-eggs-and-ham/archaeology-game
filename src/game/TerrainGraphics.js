@@ -63,6 +63,7 @@
     manager.pillarRenderMode = request.pillarRenderMode;
     manager.ridgeDirectionMode = request.ridgeDirectionMode;
     manager.performanceMode = "full";
+    manager.currentTerrainRasterDensity = request.density;
     const trench = buildTrench(request);
     manager.activeTrench = trench;
     const fieldStartedAt = now();
@@ -80,8 +81,9 @@
 
     const topologyStartedAt = now();
     const junctions = manager.buildLocalJunctionDescriptors(field, trench, grid);
-    const regions = manager.collectCompleteSurfaceRegions(field, trench, grid, junctions);
-    const prepared = manager.prepareSurfaceRegions(regions, trench);
+    const patches = manager.collectPixelSnappedSurfacePatches(field, trench, grid, junctions, request.density);
+    const regions = manager.collectSurfaceRegionsFromPatches(patches);
+    manager.prepareSurfaceRegions(regions, trench);
     const topologyMs = now() - topologyStartedAt;
 
     const ambientStartedAt = now();
@@ -91,21 +93,13 @@
     const patterns = manager.buildTerrainPatternGroups(field, trench);
 
     const compositeStartedAt = now();
-    prepared.byDepth.forEach((depthGroup) => {
-      depthGroup.regions.forEach((region) => manager.drawSurfaceRegion(region, context));
-      manager.drawTerrainPatterns(field, trench, grid, depthGroup.depth, patterns, context);
-      if (!ambient) return;
+    manager.drawPixelSnappedSurfacePatches(patches, context);
+    manager.drawTerrainPatterns(field, trench, grid, null, patterns, context);
+    if (ambient) {
       context.save();
-      if (depthGroup.compiledPath) {
-        context.clip(depthGroup.compiledPath, "evenodd");
-      } else {
-        context.beginPath();
-        depthGroup.regions.forEach((region) => manager.appendSurfaceRegionPath(context, region));
-        context.clip("evenodd");
-      }
       context.drawImage(ambient.canvas, 0, 0, request.width, request.height);
       context.restore();
-    });
+    }
     context.restore();
     context.setTransform(1, 0, 0, 1, 0, 0);
     return {

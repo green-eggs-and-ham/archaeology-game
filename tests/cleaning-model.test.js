@@ -489,7 +489,7 @@ test("held down-and-up movement through the exact water aperture completes one d
   assert.equal(dirtEffects, config.cleaning.dirtSpotsPerFace * 2);
 });
 
-test("overshooting below stays immersed while a side exit cancels handwashing", () => {
+test("overshooting below or into a side wall stays immersed without handwashing", () => {
   const SceneManager = sandbox.window.SceneManager;
   const manager = Object.create(SceneManager.prototype);
   const model = new CleaningModel(config.cleaning);
@@ -515,7 +515,7 @@ test("overshooting below stays immersed while a side exit cancels handwashing", 
   const sideAction = { type: "cleaning-item", artefact: sideways, dunkPhase: "armed", x: 100, y: 70 };
   manager.advanceCleaningDunk(sideAction, { x: 100, y: 70 }, { x: 100, y: 90 });
   manager.advanceCleaningDunk(sideAction, { x: 100, y: 90 }, { x: 130, y: 85 });
-  assert.notEqual(sideAction.dunkPhase, "immersed");
+  assert.equal(sideAction.dunkPhase, "immersed");
   assert.equal(model.progress(sideways, "front"), 0);
 });
 
@@ -580,7 +580,7 @@ test("completing cleaning automatically returns control to the Hand tool", () =>
   };
   manager.spawnCleaningWaterEffects = () => {};
   manager.spawnCleaningDirtParticles = () => {};
-  const action = { type: "cleaning-item", artefact: item, dunkPhase: "immersed", x: 100, y: 90 };
+  const action = { type: "cleaning-item", artefact: item, dunkPhase: "immersed", displaySize: 100, x: 100, y: 90 };
   manager.advanceCleaningDunk(action, { x: 100, y: 90 }, { x: 100, y: 70 });
   assert.equal(item.cleaning.status, "ready-to-return");
   assert.equal(manager.cleaningTool, "hand");
@@ -643,8 +643,6 @@ test("bucket occlusion uses the exact water aperture and toggles independently o
   const manager = Object.create(SceneManager.prototype);
   const item = artefact("augustus-as", "bucket-mask");
   manager.layout = {
-    labBackButton: { x: -100, y: -100, width: 1, height: 1 },
-    bucketModeButton: { x: 10, y: 10, width: 100, height: 30 },
     bucketDunkAperture: { x: 50, y: 60, width: 100, height: 30 }
   };
   manager.bucketOcclusionMode = "obscured";
@@ -658,9 +656,9 @@ test("bucket occlusion uses the exact water aperture and toggles independently o
   assert.equal(manager.immersedCleaningItem().artefact, item, "valid immersion survives a raw overshoot until an upper or side exit");
 
   manager.pointerAction = null;
-  manager.cleaningPointerStart(30, 20);
+  manager.activateDebugOption("water");
   assert.equal(manager.bucketOcclusionMode, "visible");
-  manager.cleaningPointerStart(30, 20);
+  manager.activateDebugOption("water");
   assert.equal(manager.bucketOcclusionMode, "obscured");
 });
 
@@ -669,7 +667,7 @@ test("immersed drag rendering clamps at the bucket base while retaining raw inpu
   const manager = Object.create(SceneManager.prototype);
   const item = artefact("augustus-as", "clamped-bucket-item");
   manager.layout = {
-    bucketGeometry: { bodyBottom: 180 },
+    bucketGeometry: { centerX: 100, waterY: 80, bodyBottom: 180, bucketWidth: 120 },
     mat: { x: 0, y: 0, width: 300, height: 300 },
     matSurface: { x: 0, y: 0, width: 300, height: 300 }
   };
@@ -681,6 +679,32 @@ test("immersed drag rendering clamps at the bucket base while retaining raw inpu
   assert.ok(action.y < 180);
   const bounds = manager.cleaningDraggedItemBounds(action);
   assert.ok(bounds.y + bounds.height <= 180);
+  manager.updateCleaningDragPosition(action, 240, 120);
+  const inner = manager.bucketInnerBoundsAtY(action.y, action.displaySize);
+  assert.ok(action.x <= inner.right, "the displayed artefact slides along the right wall");
+});
+
+test("visible and obscured water modes share the same sloping-wall collision geometry", () => {
+  const SceneManager = sandbox.window.SceneManager;
+  const expected = [];
+  for (const mode of ["visible", "obscured"]) {
+    const manager = Object.create(SceneManager.prototype);
+    manager.bucketOcclusionMode = mode;
+    manager.layout = {
+      bucketGeometry: { centerX: 160, waterY: 90, bodyBottom: 210, bucketWidth: 220 },
+      mat: { x: 0, y: 0, width: 320, height: 300 },
+      matSurface: { x: 0, y: 0, width: 320, height: 300 }
+    };
+    const action = { type: "cleaning-item", artefact: {}, displaySize: 72, dunkPhase: "immersed" };
+    manager.updateCleaningDragPosition(action, 300, 165);
+    const rightWall = manager.bucketInnerBoundsAtY(action.y, action.displaySize).right;
+    assert.equal(action.x, rightWall);
+    manager.updateCleaningDragPosition(action, 20, 260);
+    const bottomBounds = manager.cleaningDraggedItemBounds(action);
+    assert.ok(bottomBounds.y + bottomBounds.height <= manager.layout.bucketGeometry.bodyBottom);
+    expected.push({ x: action.x, y: action.y });
+  }
+  assert.deepEqual(expected[0], expected[1]);
 });
 
 test("upward entry from beneath the aperture never wets or obscures a find", () => {
