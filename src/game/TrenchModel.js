@@ -1,5 +1,5 @@
 window.TrenchModel = class TrenchModel {
-  constructor(definition, config) {
+  constructor(definition, config, artefactCatalogue = null) {
     this.id = definition.id;
     this.seed = definition.seed;
     this.label = definition.label;
@@ -30,6 +30,7 @@ window.TrenchModel = class TrenchModel {
     this.visualRevision = 0;
     this.terrainRevision = 0;
     this.discoverLayer(this.getSurfaceAt(0, 0));
+    this.artefactCatalogue = artefactCatalogue || new window.ArtefactCatalogue(config);
     this.artefacts = this.createArtefacts();
   }
 
@@ -165,120 +166,25 @@ window.TrenchModel = class TrenchModel {
     );
   }
 
+  createArtefacts() {
+    return this.artefactCatalogue.createForTrench({
+      trenchId: this.id,
+      columns: this.columns,
+      rows: this.rows,
+      maxDepth: this.maxDepth,
+      depthResolutionScale: this.depthResolutionScale,
+      footprintSize: this.artefactFootprintSize,
+      countMultiplier: this.artefactCountMultiplier,
+      random: this.randomGenerator(0xA5A5A5A5)
+    });
+  }
+
   createFootprint(x, y, size = this.artefactFootprintSize) {
-    const footprint = [];
-    for (let offsetY = 0; offsetY < size; offsetY += 1) {
-      for (let offsetX = 0; offsetX < size; offsetX += 1) footprint.push({ x: x + offsetX, y: y + offsetY });
-    }
-    return footprint;
+    return this.artefactCatalogue.createFootprint(x, y, size);
   }
 
   footprintsOverlap(first, second) {
-    return first.some((cell) => second.some((other) => cell.x === other.x && cell.y === other.y));
-  }
-
-  artefactCategories() {
-    if (Array.isArray(this.config.artefactCategories) && this.config.artefactCategories.length) {
-      return this.config.artefactCategories;
-    }
-    return (this.config.artefactCatalog || []).map((item, index) => ({
-      id: item.category || item.shape || `category-${index}`,
-      weight: 1,
-      variants: [item]
-    }));
-  }
-
-  chooseArtefactVariant(random) {
-    const categories = this.artefactCategories();
-    const totalWeight = categories.reduce((sum, category) => sum + Math.max(0, category.weight || 1), 0);
-    let choice = random() * totalWeight;
-    let selectedCategory = categories[categories.length - 1];
-    for (const category of categories) {
-      choice -= Math.max(0, category.weight || 1);
-      if (choice <= 0) {
-        selectedCategory = category;
-        break;
-      }
-    }
-    const variants = selectedCategory?.variants || [];
-    const item = variants[Math.min(variants.length - 1, Math.floor(random() * variants.length))];
-    return { category: selectedCategory, item };
-  }
-
-  createArtefacts() {
-    const random = this.randomGenerator(0xA5A5A5A5);
-    const artefacts = [];
-    const baseCount = 2 + Math.floor(random() * 2);
-    const count = baseCount * this.artefactCountMultiplier;
-    const size = this.artefactFootprintSize;
-    const maxX = this.columns - size - 1;
-    const maxY = this.rows - size - 1;
-    const referenceMaxDepth = Math.max(4, Math.round(this.maxDepth / this.depthResolutionScale));
-    const placementAttempts = Math.max(80, this.columns * this.rows);
-
-    for (let index = 0; index < count; index += 1) {
-      let x = 1;
-      let y = 1;
-      let footprint = this.createFootprint(x, y, size);
-      let attempts = 0;
-      let placementFound = false;
-      do {
-        x = 1 + Math.floor(random() * maxX);
-        y = 1 + Math.floor(random() * maxY);
-        footprint = this.createFootprint(x, y, size);
-        attempts += 1;
-        placementFound = !artefacts.some((artefact) => this.footprintsOverlap(footprint, artefact.footprint));
-      } while (attempts < placementAttempts && !placementFound);
-
-      if (!placementFound) {
-        for (let candidateY = 1; candidateY <= maxY && !placementFound; candidateY += 1) {
-          for (let candidateX = 1; candidateX <= maxX; candidateX += 1) {
-            const candidate = this.createFootprint(candidateX, candidateY, size);
-            if (artefacts.some((artefact) => this.footprintsOverlap(candidate, artefact.footprint))) continue;
-            x = candidateX;
-            y = candidateY;
-            footprint = candidate;
-            placementFound = true;
-            break;
-          }
-        }
-      }
-      if (!placementFound) break;
-
-      const selection = this.chooseArtefactVariant(random);
-      const item = selection.item;
-      if (!item) continue;
-      const referenceDepth = 2 + Math.floor(random() * (referenceMaxDepth - 3));
-      const id = `${this.id}-artefact-${index}`;
-      artefacts.push({
-        id,
-        label: item.label,
-        shape: item.shape,
-        colour: item.colour,
-        category: item.category || selection.category.id,
-        variantId: item.id || item.variantId || item.shape,
-        material: item.material || item.label,
-        robustness: item.robustness || null,
-        cleaningTool: item.cleaningTool || null,
-        postCleaningTreatment: item.postCleaningTreatment || null,
-        cleanable: Boolean(item.cleanable),
-        requiresSpecialist: Boolean(item.requiresSpecialist),
-        cleaning: item.cleanable ? {
-          status: "dirty",
-          location: "inventory",
-          activeFace: "front",
-          faces: null
-        } : null,
-        x,
-        y,
-        centerX: x + (size - 1) / 2,
-        centerY: y + (size - 1) / 2,
-        footprint,
-        depth: referenceDepth * this.depthResolutionScale,
-        exposure: "hidden"
-      });
-    }
-    return artefacts;
+    return this.artefactCatalogue.footprintsOverlap(first, second);
   }
 
   getDepth(x, y) {

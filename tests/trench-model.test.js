@@ -1,4 +1,5 @@
 const assert = require("node:assert/strict");
+const crypto = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
@@ -6,6 +7,8 @@ const vm = require("node:vm");
 
 const sandbox = { window: {} };
 vm.createContext(sandbox);
+vm.runInContext(fs.readFileSync(path.join(__dirname, "../src/game/GameConfigValidator.js"), "utf8"), sandbox);
+vm.runInContext(fs.readFileSync(path.join(__dirname, "../src/game/ArtefactCatalogue.js"), "utf8"), sandbox);
 vm.runInContext(fs.readFileSync(path.join(__dirname, "../src/game/TrenchModel.js"), "utf8"), sandbox);
 vm.runInContext(fs.readFileSync(path.join(__dirname, "../data/game-config.js"), "utf8"), sandbox);
 const TrenchModel = sandbox.window.TrenchModel;
@@ -44,6 +47,29 @@ function model() {
   trench.artefacts = [];
   return trench;
 }
+
+test("configured seeds preserve the established artefact sequence and placement", () => {
+  const signature = gameConfig.trenches.map((definition) =>
+    new TrenchModel(definition, gameConfig).artefacts.map((artefact) => [
+      artefact.variantId,
+      artefact.x,
+      artefact.y,
+      artefact.depth,
+      artefact.footprint
+    ])
+  );
+  const digest = crypto.createHash("sha256").update(JSON.stringify(signature)).digest("hex");
+  assert.equal(digest, "1f94a020fac815335b43722e7e7a81df2e75cf5cab9f40dc0153874cf9fd80ac");
+});
+
+test("configured seeds preserve the established stratigraphy and grass fields", () => {
+  const signature = gameConfig.trenches.map((definition) => {
+    const trench = new TrenchModel(definition, gameConfig);
+    return [trench.stratigraphy, trench.grassCoverage, trench.grassMask];
+  });
+  const digest = crypto.createHash("sha256").update(JSON.stringify(signature)).digest("hex");
+  assert.equal(digest, "481afa18050b0d036482e2568d10c65c597291b7be7c83d4f933977a9e0ac53f");
+});
 
 test("sixteen-level trenches duplicate seeded reference strata and artefact depths proportionally", () => {
   const definition = { id: "scaled", seed: 173, label: "Scaled", layerVariant: 0 };

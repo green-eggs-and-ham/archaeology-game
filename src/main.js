@@ -33,6 +33,15 @@ function getCanvasPixelDensity(size) {
 }
 
 function setup() {
+  try {
+    window.GameConfigValidator.validate(window.GameConfig, {
+      visualRegistry: window.ArtefactRenderer.visualRegistry()
+    });
+  } catch (error) {
+    window.GameBoot?.resourceFailed("Game configuration");
+    throw error;
+  }
+
   const size = getCanvasSize();
   activeCanvasDensity = getCanvasPixelDensity(size);
   pixelDensity(activeCanvasDensity);

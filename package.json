@@ -1,0 +1,14 @@
+{
+  "name": "archaeology-game-prototype",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Build-free p5.js archaeology excavation and finds-care prototype",
+  "scripts": {
+    "test": "node --test tests/*.test.js",
+    "test:models": "node --test tests/cleaning-model.test.js tests/trench-model.test.js",
+    "test:scenes": "node --test tests/cleaning-scene.test.js tests/trench-scene.test.js tests/browser-wiring.test.js",
+    "test:terrain": "node --test tests/terrain-engine.test.js tests/terrain-pipeline.test.js tests/trench-scene.test.js tests/browser-wiring.test.js",
+    "check:structure": "node scripts/check-structure.js",
+    "check": "npm test && npm run check:structure"
+  }
+}

@@ -7,7 +7,7 @@
     <link rel="stylesheet" href="./styles.css" />
     <script>
       window.GameBoot = {
-        total: 9,
+        total: 15,
         complete: 0,
         failed: false,
         addResources(count = 1) {
@@ -82,10 +82,16 @@
     <script defer src="https://cdn.jsdelivr.net/npm/p5@2.0.1/lib/p5.min.js" onload="GameBoot.resourceLoaded()" onerror="GameBoot.resourceFailed('The drawing library')"></script>
     <script defer src="./data/game-config.js" onload="GameBoot.resourceLoaded()" onerror="GameBoot.resourceFailed('Game configuration')"></script>
     <script defer src="./src/utils/assetLoader.js" onload="GameBoot.resourceLoaded()" onerror="GameBoot.resourceFailed('The asset loader')"></script>
+    <script defer src="./src/game/GameConfigValidator.js" onload="GameBoot.resourceLoaded()" onerror="GameBoot.resourceFailed('Configuration validation')"></script>
+    <script defer src="./src/game/ArtefactCatalogue.js" onload="GameBoot.resourceLoaded()" onerror="GameBoot.resourceFailed('The artefact catalogue')"></script>
     <script defer src="./src/game/CleaningModel.js" onload="GameBoot.resourceLoaded()" onerror="GameBoot.resourceFailed('Cleaning rules')"></script>
     <script defer src="./src/game/TrenchModel.js" onload="GameBoot.resourceLoaded()" onerror="GameBoot.resourceFailed('Trench rules')"></script>
+    <script defer src="./src/game/ArtefactRenderer.js" onload="GameBoot.resourceLoaded()" onerror="GameBoot.resourceFailed('Artefact graphics')"></script>
     <script defer src="./src/game/Renderer.js" onload="GameBoot.resourceLoaded()" onerror="GameBoot.resourceFailed('The renderer')"></script>
     <script defer src="./src/game/TerrainGraphics.js" onload="GameBoot.resourceLoaded()" onerror="GameBoot.resourceFailed('Terrain graphics')"></script>
+    <script defer src="./src/game/TerrainPipeline.js" onload="GameBoot.resourceLoaded()" onerror="GameBoot.resourceFailed('Terrain pipeline')"></script>
+    <script defer src="./src/scenes/CleaningScene.js" onload="GameBoot.resourceLoaded()" onerror="GameBoot.resourceFailed('Finds lab scene')"></script>
+    <script defer src="./src/scenes/TrenchScene.js" onload="GameBoot.resourceLoaded()" onerror="GameBoot.resourceFailed('Trench scene')"></script>
     <script defer src="./src/game/SceneManager.js" onload="GameBoot.resourceLoaded()" onerror="GameBoot.resourceFailed('Scene controls')"></script>
     <script defer src="./src/main.js" onload="GameBoot.resourceLoaded()" onerror="GameBoot.resourceFailed('Game startup')"></script>
   </body>

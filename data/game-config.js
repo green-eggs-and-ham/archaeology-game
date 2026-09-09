@@ -78,37 +78,63 @@ window.GameConfig = {
     ["#875f43", "#c9a875", "#965c51", "#70706a"]
   ],
   bedrock: { name: "Bedrock", colour: "#5c6873", pattern: "cracks" },
+  careProfiles: {
+    "robust-standard": {
+      robustness: "Robust",
+      recommendedTool: "toothbrush",
+      allowedTools: ["toothbrush", "fine-brush"],
+      postCleaningTreatment: "identification"
+    },
+    "fragile-standard": {
+      robustness: "Fragile",
+      recommendedTool: "fine-brush",
+      allowedTools: ["fine-brush"],
+      postCleaningTreatment: "identification"
+    },
+    "delicate-standard": {
+      robustness: "Delicate",
+      recommendedTool: "fine-brush",
+      allowedTools: ["fine-brush"],
+      postCleaningTreatment: "identification"
+    },
+    "delicate-specialist": {
+      robustness: "Delicate",
+      recommendedTool: "fine-brush",
+      allowedTools: ["fine-brush"],
+      postCleaningTreatment: "specialist-treatment"
+    }
+  },
   artefactCategories: [
     {
       id: "pottery",
       weight: 1,
       variants: [
-        { id: "folded-beaker", label: "Folded beaker sherd", shape: "pottery", colour: "#49392f", material: "Roman pottery", robustness: "Fragile", cleaningTool: "fine-brush", postCleaningTreatment: "identification", cleanable: true },
-        { id: "mortarium", label: "Mortarium rim", shape: "pottery", colour: "#c5a477", material: "Roman pottery", robustness: "Robust", cleaningTool: "toothbrush", postCleaningTreatment: "identification", cleanable: true },
-        { id: "decorated-samian", label: "Decorated Samian sherd", shape: "pottery", colour: "#a84f38", material: "Fine Roman pottery", robustness: "Fragile", cleaningTool: "fine-brush", postCleaningTreatment: "identification", cleanable: true },
-        { id: "storage-jar", label: "Storage-jar sherd", shape: "pottery", colour: "#80664d", material: "Coarse Roman pottery", robustness: "Robust", cleaningTool: "toothbrush", postCleaningTreatment: "identification", cleanable: true },
-        { id: "verulamium-flagon", label: "Verulamium flagon sherd", shape: "pottery", colour: "#c7b48e", material: "Roman pottery", robustness: "Fragile", cleaningTool: "fine-brush", postCleaningTreatment: "identification", cleanable: true },
-        { id: "dark-cooking-pot", label: "Dark cooking-pot rim", shape: "pottery", colour: "#4a4742", material: "Roman pottery", robustness: "Robust", cleaningTool: "toothbrush", postCleaningTreatment: "identification", cleanable: true }
+        { id: "folded-beaker", visualKey: "folded-beaker", label: "Folded beaker sherd", shape: "pottery", colour: "#49392f", material: "Roman pottery", careProfile: "fragile-standard", cleanable: true },
+        { id: "mortarium", visualKey: "mortarium", label: "Mortarium rim", shape: "pottery", colour: "#c5a477", material: "Roman pottery", careProfile: "robust-standard", cleanable: true },
+        { id: "decorated-samian", visualKey: "decorated-samian", label: "Decorated Samian sherd", shape: "pottery", colour: "#a84f38", material: "Fine Roman pottery", careProfile: "fragile-standard", cleanable: true },
+        { id: "storage-jar", visualKey: "storage-jar", label: "Storage-jar sherd", shape: "pottery", colour: "#80664d", material: "Coarse Roman pottery", careProfile: "robust-standard", cleanable: true },
+        { id: "verulamium-flagon", visualKey: "verulamium-flagon", label: "Verulamium flagon sherd", shape: "pottery", colour: "#c7b48e", material: "Roman pottery", careProfile: "fragile-standard", cleanable: true },
+        { id: "dark-cooking-pot", visualKey: "dark-cooking-pot", label: "Dark cooking-pot rim", shape: "pottery", colour: "#4a4742", material: "Roman pottery", careProfile: "robust-standard", cleanable: true }
       ]
     },
     {
       id: "bead",
       weight: 1,
-      variants: [{ id: "glass-bead", label: "Glass bead", shape: "bead", colour: "#3f9eb1", material: "Glass", cleanable: false }]
+      variants: [{ id: "glass-bead", visualKey: "glass-bead", label: "Glass bead", shape: "bead", colour: "#3f9eb1", material: "Glass", cleanable: false }]
     },
     {
       id: "arrowhead",
       weight: 1,
-      variants: [{ id: "arrowhead", label: "Arrowhead", shape: "arrowhead", colour: "#a9a6a0", material: "Stone", cleanable: false }]
+      variants: [{ id: "arrowhead", visualKey: "arrowhead", label: "Arrowhead", shape: "arrowhead", colour: "#a9a6a0", material: "Stone", cleanable: false }]
     },
     {
       id: "coin",
       weight: 1,
       variants: [
-        { id: "augustus-as", label: "Augustus copper As", shape: "coin", colour: "#a66b43", material: "Copper alloy", robustness: "Robust", cleaningTool: "toothbrush", postCleaningTreatment: "identification", cleanable: true },
-        { id: "hadrian-denarius", label: "Hadrian silver denarius", shape: "coin", colour: "#aaaeb1", material: "Silver", robustness: "Delicate", cleaningTool: "fine-brush", postCleaningTreatment: "identification", cleanable: true },
-        { id: "victorinus-radiate", label: "Victorinus bronze radiate", shape: "coin", colour: "#817049", material: "Bronze", robustness: "Delicate", cleaningTool: "fine-brush", postCleaningTreatment: "specialist-treatment", cleanable: true, requiresSpecialist: true },
-        { id: "constantine-nummus", label: "Constantine I bronze nummus", shape: "coin", colour: "#756342", material: "Bronze", robustness: "Delicate", cleaningTool: "fine-brush", postCleaningTreatment: "specialist-treatment", cleanable: true, requiresSpecialist: true }
+        { id: "augustus-as", visualKey: "augustus-as", label: "Augustus copper As", shape: "coin", colour: "#a66b43", material: "Copper alloy", careProfile: "robust-standard", cleanable: true },
+        { id: "hadrian-denarius", visualKey: "hadrian-denarius", label: "Hadrian silver denarius", shape: "coin", colour: "#aaaeb1", material: "Silver", careProfile: "delicate-standard", cleanable: true },
+        { id: "victorinus-radiate", visualKey: "victorinus-radiate", label: "Victorinus bronze radiate", shape: "coin", colour: "#817049", material: "Bronze", careProfile: "delicate-specialist", cleanable: true },
+        { id: "constantine-nummus", visualKey: "constantine-nummus", label: "Constantine I bronze nummus", shape: "coin", colour: "#756342", material: "Bronze", careProfile: "delicate-specialist", cleanable: true }
       ]
     }
   ],

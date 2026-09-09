@@ -1,7 +1,7 @@
 self.window = self;
-importScripts("./SceneManager.js", "./TerrainGraphics.js");
+importScripts("./TerrainGraphics.js");
 
-const terrainManager = self.TerrainGraphics.createManager();
+const terrainEngine = self.TerrainGraphics.createEngine();
 let terrainCanvas = null;
 
 function terrainSurface(width, height) {
@@ -15,15 +15,15 @@ self.onmessage = (event) => {
   const request = event.data;
   try {
     const canvas = terrainSurface(request.pixelWidth, request.pixelHeight);
-    const result = self.TerrainGraphics.render(request, canvas, terrainManager);
+    const result = self.TerrainGraphics.render(request, canvas, terrainEngine);
     const bitmap = canvas.transferToImageBitmap();
     self.postMessage({
       type: "terrain-result",
       jobId: request.jobId,
       key: request.key,
       bitmap,
-      sourcePixelWidth: request.width * request.density,
-      sourcePixelHeight: request.height * request.density,
+      sourcePixelWidth: request.pixelWidth,
+      sourcePixelHeight: request.pixelHeight,
       timings: result.timings,
       stats: result.stats
     }, [bitmap]);
