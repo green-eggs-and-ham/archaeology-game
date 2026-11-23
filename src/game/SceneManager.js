@@ -15,6 +15,8 @@ window.SceneManager = class SceneManager {
     this.pillarRenderMode = "round";
     this.ridgeDirectionMode = "current";
     this.performanceMode = "full";
+    this.mapRenderMode = "relief";
+    this.isoOnPause = false;
     this.debugMenuOpen = false;
     this.debugMessage = "Temporary visual and performance controls.";
     this.frameRequestPending = false;
@@ -26,6 +28,9 @@ window.SceneManager = class SceneManager {
       coalesced: 0,
       presented: 0,
       profileCacheHits: 0,
+      profileColumnsDrawn: 0,
+      inventorySorts: 0,
+      inventoryRebuilds: 0,
       profileRebuilds: 0
     };
     this.mapTiles = [];
@@ -44,6 +49,8 @@ window.SceneManager = class SceneManager {
     };
     this.artefactCatalogue = new window.ArtefactCatalogue(config);
     this.trenches = config.trenches.map((definition) => new window.TrenchModel(definition, config, this.artefactCatalogue));
+    this.siteScene = new window.SiteMapScene(this);
+    this.previewStats = this.siteScene.pipeline.stats;
     this.allCollectedArtefacts().forEach((artefact) => {
       this.cleaningModel.ensureState(artefact);
       this.assignCollectionSequence(artefact);
@@ -59,6 +66,7 @@ window.SceneManager = class SceneManager {
     this.invalidateTerrainCache({ releaseGrid: true, releaseAmbient: true });
     this.trenchScene.handleResize();
     this.cleaningScene.handleResize();
+    this.siteScene.handleResize();
     this.updateCanvasPixelStats();
   }
 
@@ -71,6 +79,7 @@ window.SceneManager = class SceneManager {
     if (this.currentScene === "site") this.drawSiteMap();
     else if (this.currentScene === "cleaning") this.cleaningScene.draw();
     else this.trenchScene.draw();
+    if (this.currentScene === "site" && !this.siteScene.isReady()) return;
     this.drawDebugMenu();
     this.drawCustomPointer();
   }
@@ -81,6 +90,9 @@ window.SceneManager = class SceneManager {
       coalesced: 0,
       presented: 0,
       profileCacheHits: 0,
+      profileColumnsDrawn: 0,
+      inventorySorts: 0,
+      inventoryRebuilds: 0,
       profileRebuilds: 0
     };
     this.frameStats.requests += 1;
@@ -197,6 +209,41 @@ window.SceneManager = class SceneManager {
     text(subtitle, 18, 17 + titleSize);
   }
 
+  panelCacheBounds(panel) {
+    const density = typeof pixelDensity === "function" ? pixelDensity() : 1;
+    const x = Math.floor(panel.x * density), y = Math.floor(panel.y * density);
+    // Include the panel shadow and keep both copies aligned to backing pixels.
+    const pixelWidth = Math.ceil((panel.x + panel.width + 4) * density) - x;
+    const pixelHeight = Math.ceil((panel.y + panel.height + 5) * density) - y;
+    return { x: x / density, y: y / density, width: pixelWidth / density,
+      height: pixelHeight / density, pixelWidth, pixelHeight, density };
+  }
+
+  capturePanel(cache, bounds, key) {
+    const { x, y, width, height, pixelWidth, pixelHeight, density } = bounds;
+    if (typeof document === "undefined" || !drawingContext.canvas) {
+      this.releaseCanvasBuffer(cache);
+      return typeof get === "function" ? { key, image: get(x, y, width, height) } : null;
+    }
+    if (!cache?.canvas || cache.pixelWidth !== pixelWidth || cache.pixelHeight !== pixelHeight || cache.density !== density) {
+      this.releaseCanvasBuffer(cache);
+      const canvas = document.createElement("canvas");
+      canvas.width = pixelWidth;
+      canvas.height = pixelHeight;
+      cache = { canvas, pixelWidth, pixelHeight, density, context: canvas.getContext("2d") };
+    }
+    cache.context.clearRect(0, 0, pixelWidth, pixelHeight);
+    cache.context.drawImage(drawingContext.canvas, Math.round(x * density), Math.round(y * density),
+      pixelWidth, pixelHeight, 0, 0, pixelWidth, pixelHeight);
+    cache.key = key;
+    return cache;
+  }
+
+  drawPanelCache(cache, bounds) {
+    if (cache.canvas) drawingContext.drawImage(cache.canvas, bounds.x, bounds.y, bounds.width, bounds.height);
+    else image(cache.image, bounds.x, bounds.y, bounds.width, bounds.height);
+  }
+
   allCollectedArtefacts() {
     return this.trenches.flatMap((trench) => trench.artefacts.filter((artefact) => artefact.exposure === "collected"));
   }
@@ -237,81 +284,16 @@ window.SceneManager = class SceneManager {
   }
 
   drawSiteMap() {
-    this.drawHeading("Dig Site", "Choose a trench to start digging.");
-    const labWidth = Math.max(104, Math.min(160, width * 0.24));
-    const labHeight = Math.max(30, Math.min(38, height * 0.09));
-    this.layout.labButton = { x: width - labWidth - 14, y: 12, width: labWidth, height: labHeight };
-    this.renderer.button(this.layout.labButton, "Finds lab", false, true, false, {
-      badgeCount: this.pendingCleaningCount(),
-      minimumSize: 9,
-      maximumSize: 13
-    });
-    const tileWidth = Math.min(width * 0.27, height * 0.55);
-    const tileHeight = tileWidth * 0.5;
-    const originX = width / 2;
-    const originY = height * 0.3;
-    this.mapTiles = [];
-
-    for (let row = 0; row < this.config.map.rows; row += 1) {
-      for (let column = 0; column < this.config.map.columns; column += 1) {
-        const trench = this.trenches[row * this.config.map.columns + column];
-        const x = originX + (column - row) * tileWidth * 0.48;
-        const y = originY + (column + row) * tileHeight * 0.48;
-        const tile = { x, y, width: tileWidth, height: tileHeight, trench };
-        this.mapTiles.push(tile);
-        this.drawMapTile(tile, row, column);
-      }
-    }
-
-    const hint = "Tap a diamond to inspect a trench from above.";
-    const hintMaxWidth = Math.max(120, width - 36);
-    let hintSize = Math.max(9, Math.min(14, width * 0.017));
-    textSize(hintSize);
-    while (hintSize > 9 && textWidth(hint) > hintMaxWidth - 24) {
-      hintSize -= 0.5;
-      textSize(hintSize);
-    }
-    const hintWidth = Math.min(hintMaxWidth, Math.max(210, textWidth(hint) + 24));
-    this.renderer.panel(18, height - 45, hintWidth, 30, "#e6d3a9");
-    fill("#25444a");
-    textAlign(LEFT, CENTER);
-    textSize(hintSize);
-    text(hint, 30, height - 30);
+    this.siteScene.draw();
   }
 
-  drawMapTile(tile, row, column) {
-    const { x, y, width: tileWidth, height: tileHeight, trench } = tile;
-    const progress = trench.artefacts.filter((artefact) => artefact.exposure === "collected").length;
-    const soil = trench.getRenderableSurfaceAt(Math.floor(trench.columns / 2), Math.floor(trench.rows / 2));
-    const topY = y;
-    const bottomY = y + tileHeight * 0.25;
-
-    noStroke();
-    fill("#102d34");
-    quad(x, bottomY + tileHeight * 0.16, x + tileWidth / 2, bottomY, x, bottomY - tileHeight * 0.16, x - tileWidth / 2, bottomY);
-    fill(soil.colour);
-    quad(x, topY - tileHeight / 2, x + tileWidth / 2, topY, x, topY + tileHeight / 2, x - tileWidth / 2, topY);
-    stroke("#ecd9ab");
-    strokeWeight(1.5);
-    noFill();
-    quad(x, topY - tileHeight / 2, x + tileWidth / 2, topY, x, topY + tileHeight / 2, x - tileWidth / 2, topY);
-    noStroke();
-    fill("#263f37");
-    textAlign(CENTER, CENTER);
-    textStyle(BOLD);
-    textSize(Math.max(10, tileWidth * 0.16));
-    text(trench.label, x, y - 2);
-    textStyle(NORMAL);
-
-    if (progress > 0 || trench.isComplete()) {
-      fill(trench.isComplete() ? "#4c9d67" : "#f4b942");
-      circle(x + tileWidth * 0.3, y - tileHeight * 0.06, Math.max(10, tileWidth * 0.17));
-      fill("#17333b");
-      textSize(Math.max(8, tileWidth * 0.11));
-      text(progress, x + tileWidth * 0.3, y - tileHeight * 0.055);
-    }
+  enterSiteMap() {
+    this.siteScene.enter();
   }
 
+  drawMapTile(tile) {
+    this.siteScene.drawFlatTile(tile);
+  }
 
   debugMenuLayout() {
     const buttonSize = 44;
@@ -324,7 +306,7 @@ window.SceneManager = class SceneManager {
     };
     if (!this.debugMenuOpen) return { button, panel: null, options: [] };
     const panelWidth = Math.min(340, width - 24);
-    const panelHeight = Math.min(236, height - 68);
+    const panelHeight = Math.min(280, height - 68);
     const panel = {
       x: Math.max(12, width - panelWidth - 12),
       y: Math.max(12, button.y - panelHeight - 6),
@@ -337,13 +319,16 @@ window.SceneManager = class SceneManager {
       { id: "smoothing", label: this.terrainSmoothingMode === "all" ? "Smooth A: All" : "Smooth B: Focus", disabled: this.performanceMode === "lite" },
       { id: "pillar", label: this.pillarRenderMode === "round" ? "Pillars A: Round" : "Pillars B: Merge", disabled: this.performanceMode === "lite" },
       { id: "ridge", label: this.ridgeDirectionMode === "current" ? "Ridges A: Current" : "Ridges B: High cut", disabled: this.performanceMode === "lite" },
-      { id: "water", label: this.bucketOcclusionMode === "obscured" ? "Water B: Obscured" : "Water A: Visible" }
+      { id: "water", label: this.bucketOcclusionMode === "obscured" ? "Water B: Obscured" : "Water A: Visible" },
+      { id: "map", label: this.mapRenderMode === "relief" ? "Map: Relief" : "Map: Flat" },
+      { id: "iso-pause", label: this.isoOnPause ? "ISO on pause: On" : "ISO on pause: Off" }
     ];
     const inset = 10;
     const gap = 6;
     const top = panel.y + 34;
-    const footerHeight = 28;
-    const rowHeight = Math.max(34, (panel.height - 34 - footerHeight - inset - gap * 2) / 3);
+    const footerHeight = 58;
+    const optionRows = Math.ceil(definitions.length / 2);
+    const rowHeight = Math.max(26, (panel.height - 34 - footerHeight - inset - gap * (optionRows - 1)) / optionRows);
     const columnWidth = (panel.width - inset * 2 - gap) / 2;
     const options = definitions.map((entry, index) => ({
       ...entry,
@@ -375,13 +360,15 @@ window.SceneManager = class SceneManager {
         this.renderer.button(
           option.bounds,
           option.label,
-          ["depth", "performance", "smoothing", "pillar", "ridge", "water"].some((id) => id === option.id && (
+          ["depth", "performance", "smoothing", "pillar", "ridge", "water", "map", "iso-pause"].some((id) => id === option.id && (
             (id === "depth" && this.showDepthDebug) ||
             (id === "performance" && this.performanceMode === "lite") ||
             (id === "smoothing" && this.terrainSmoothingMode === "focus") ||
             (id === "pillar" && this.pillarRenderMode === "merge") ||
             (id === "ridge" && this.ridgeDirectionMode === "high-cut") ||
-            (id === "water" && this.bucketOcclusionMode === "obscured")
+            (id === "water" && this.bucketOcclusionMode === "obscured") ||
+            (id === "map" && this.mapRenderMode === "relief") ||
+            (id === "iso-pause" && this.isoOnPause)
           )),
           true,
           option.disabled,
@@ -389,9 +376,13 @@ window.SceneManager = class SceneManager {
         );
       });
       fill("#40585c");
-      textAlign(LEFT, BOTTOM);
+      textAlign(LEFT, TOP);
       textSize(Math.max(7.5, Math.min(10, debug.panel.width * 0.03)));
-      text(this.debugMessage, debug.panel.x + 11, debug.panel.y + debug.panel.height - 7, debug.panel.width - 22, 22);
+      text(this.debugMessage, debug.panel.x + 11, debug.panel.y + debug.panel.height - 51, debug.panel.width - 22, 20);
+      const previews = this.previewStats;
+      const memory = ((previews.retainedBytes + previews.bitmapBytes) / 1048576).toFixed(1);
+      text(`Map builds: ${previews.terrainRebuilds} · cache hits: ${previews.cacheHits} · ${memory} MB`, debug.panel.x + 11, debug.panel.y + debug.panel.height - 29);
+      text(`ISO active: ${previews.lastComputeMs.toFixed(1)} ms · total: ${previews.lastLatencyMs.toFixed(1)} ms · cancelled: ${previews.cancelledJobs}`, debug.panel.x + 11, debug.panel.y + debug.panel.height - 15);
     }
 
     const centerX = debug.button.x + debug.button.width / 2;
@@ -417,6 +408,7 @@ window.SceneManager = class SceneManager {
       this.performanceMode = this.performanceMode === "full" ? "lite" : "full";
       this.invalidateTerrainCache({ releaseAmbient: true });
       this.trimEffectsForMode();
+      this.siteScene.pipeline.presentationChanged();
       this.debugMessage = this.performanceMode === "lite"
         ? "Lite uses simple cells and edge shading."
         : "Full restores smoothed terrain and curved shadows.";
@@ -432,6 +424,14 @@ window.SceneManager = class SceneManager {
       this.ridgeDirectionMode = this.ridgeDirectionMode === "current" ? "high-cut" : "current";
       this.invalidateTerrainCache();
       this.debugMessage = this.ridgeDirectionMode === "high-cut" ? "Shallower ridges are cut inward." : "Original ridge ownership restored.";
+    } else if (id === "map") {
+      this.mapRenderMode = this.mapRenderMode === "relief" ? "flat" : "relief";
+      this.siteScene.pipeline.presentationChanged();
+      this.debugMessage = this.mapRenderMode === "relief" ? "Excavated trench previews restored." : "Original flat map comparison.";
+    } else if (id === "iso-pause") {
+      this.isoOnPause = !this.isoOnPause;
+      this.siteScene.pipeline.pauseModeChanged();
+      this.debugMessage = this.isoOnPause ? "Previews prepare 250 ms after release." : "Previews prepare in the lab and on the map.";
     } else if (id === "water") {
       this.bucketOcclusionMode = this.bucketOcclusionMode === "obscured" ? "visible" : "obscured";
       this.debugMessage = this.bucketOcclusionMode === "obscured" ? "Bucket foreground obscures immersed finds." : "Immersed finds remain visible.";
@@ -488,6 +488,7 @@ window.SceneManager = class SceneManager {
     if (this.currentScene === "trench" && this.activeTrench !== trench) this.trenchScene.leave();
     this.activeTrench = trench;
     this.currentScene = "trench";
+    this.siteScene.sceneChanged();
     this.tool = "scoop";
     this.activeArtefactCoach = this.artefactCoaches?.get(trench.id || trench) || null;
     this.collectionFlights.length = 0;
@@ -578,6 +579,7 @@ window.SceneManager = class SceneManager {
   }
 
   pointerStart(x, y, source = "mouse") {
+    if (this.currentScene === "site" && !this.siteScene.isReady()) return;
     this.pointer = {
       x,
       y,

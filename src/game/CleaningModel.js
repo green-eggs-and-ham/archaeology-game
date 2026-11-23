@@ -267,6 +267,7 @@
       if (this.progress(artefact, face) >= this.completionRatio) {
         spots.forEach((spot) => { spot.remaining = 0; });
       }
+      if (changed && face === FACE.FRONT) state.frontDirtRevision = (state.frontDirtRevision || 0) + 1;
       if (this.allFacesComplete(artefact)) state.status = STATUS.READY_TO_RETURN;
       return {
         changed,
@@ -302,6 +303,9 @@
 
       applyPower(face, this.handwashPowerPerDunk);
       applyPower(reverseFace, this.handwashPowerPerDunk * this.handwashReversePowerRatio);
+      if (affectedSpots.some((spot) => spot.face === FACE.FRONT)) {
+        state.frontDirtRevision = (state.frontDirtRevision || 0) + 1;
+      }
       if (this.allFacesComplete(artefact)) state.status = STATUS.READY_TO_RETURN;
       return {
         changed: affectedSpots.length > 0,

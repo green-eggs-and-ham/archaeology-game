@@ -270,7 +270,12 @@
       const gridPixels = (this.gridCache?.pixelWidth || 0) * (this.gridCache?.pixelHeight || 0);
       const ambientPixels = (this.ambientBuffer?.pixelWidth || 0) * (this.ambientBuffer?.pixelHeight || 0);
       const profilePixels = (host.profileCache?.pixelWidth || 0) * (host.profileCache?.pixelHeight || 0);
-      host.effectStats.allocatedCanvasPixels = gridPixels + ambientPixels + profilePixels;
+      const geologyPixels = (host.profileGeology?.pixelWidth || 0) * (host.profileGeology?.pixelHeight || 0);
+      const inventoryPixels = (host.inventoryPanel?.pixelWidth || 0) * (host.inventoryPanel?.pixelHeight || 0);
+      const previewPixels = (host.previewStats?.bitmapBytes || 0) / 4;
+      const sitePixels = (host.siteScene?.ground?.width || 0) * (host.siteScene?.ground?.height || 0);
+      host.effectStats.allocatedCanvasPixels = gridPixels + ambientPixels + profilePixels + geologyPixels + inventoryPixels + previewPixels + sitePixels;
+      host.effectStats.previewRetainedBytes = host.previewStats?.retainedBytes || 0;
     }
 
     drawGridCache(cacheBounds) {

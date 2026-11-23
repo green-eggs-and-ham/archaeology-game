@@ -115,7 +115,7 @@ test("releasing a fallback p5 image cache disposes its backing image", () => {
 test("profile rendering is rebuilt only when its visual identity changes", () => {
   const scene = manager();
   const profile = { x: 20, y: 30, width: 240, height: 180 };
-  const testTrench = { id: "profile-cache", visualRevision: 2 };
+  const testTrench = { id: "profile-cache", visualRevision: 2, rows: 1, depths: [[0]], artefacts: [], getDiscoveredLayers: () => [] };
   scene.layout = { isPortrait: false };
   let rebuilds = 0;
   scene.drawProfile = () => { rebuilds += 1; };
@@ -130,13 +130,16 @@ test("profile rendering is rebuilt only when its visual identity changes", () =>
 
   testTrench.visualRevision += 1;
   scene.drawCachedProfile(testTrench, profile);
+  assert.equal(rebuilds, 1, "a change outside the displayed profile reuses the panel");
+  testTrench.depths[0][0] += 1;
+  scene.drawCachedProfile(testTrench, profile);
   assert.equal(rebuilds, 2);
 });
 
 test("browser profile caching copies device pixels and reuses its backing surface", () => {
   const scene = manager();
   const profile = { x: 20.25, y: 30.5, width: 240, height: 180 };
-  const testTrench = { id: "browser-profile-cache", visualRevision: 2 };
+  const testTrench = { id: "browser-profile-cache", rows: 1, depths: [[0]], artefacts: [], getDiscoveredLayers: () => [] };
   const sourceCanvas = { width: 1600, height: 1200 };
   const previousSourceCanvas = drawingContext.canvas;
   const previousPixelDensity = sandbox.pixelDensity;
@@ -161,7 +164,7 @@ test("browser profile caching copies device pixels and reuses its backing surfac
   scene.drawProfile = () => {};
 
   try {
-    const bounds = scene.profileCacheBounds(profile);
+    const bounds = scene.panelCacheBounds(profile);
     scene.drawCachedProfile(testTrench, profile);
     assert.equal(cacheCanvases.length, 1);
     assert.deepEqual(cacheDraws[0], [
@@ -190,6 +193,55 @@ test("browser profile caching copies device pixels and reuses its backing surfac
     else sandbox.pixelDensity = previousPixelDensity;
     if (previousDocument === undefined) delete sandbox.document;
     else sandbox.document = previousDocument;
+  }
+});
+
+test("only changed centre-row columns rebuild geology while discoveries and visible quadrants refresh the profile", () => {
+  const scene = manager();
+  const soil = { id: "soil", colour: "#ac9770" }, bedrock = { id: "bedrock", colour: "#443322" };
+  const layers = [soil];
+  let quadrants = [0];
+  const model = { id: "section", rows: 3, columns: 5, maxDepth: 4, artefacts: [],
+    depths: [[0, 0, 0, 0, 0], [0, 2, 1, 0, 0], [0, 0, 0, 0, 0]],
+    getStratumAt: (_x, _y, d) => d >= 4 ? bedrock : soil,
+    getDiscoveredLayers: () => layers, artefactVisibleQuadrants: () => quadrants };
+  const profile = { x: 5.25, y: 10.5, width: 40, height: 25 };
+  const oldDoc = sandbox.document;
+  const calls = [];
+  const ctx = { save() {}, restore() {}, beginPath() {}, rect() {}, clip() {}, clearRect() {}, setTransform() {},
+    fillRect(...args) { calls.push(args); } };
+  sandbox.document = { createElement: () => ({ getContext: () => ctx }) };
+  scene.mutedColour = (colour) => colour;
+  const draw = () => scene.drawProfileGeology(model, profile, 8, 5);
+  const key = () => scene.profileCacheKey(model, profile);
+  try {
+    draw();
+    const first = key();
+    assert.equal(scene.frameStats.profileColumnsDrawn, 5);
+    calls.length = 0;
+    model.depths[0][0]++;
+    draw();
+    assert.equal(key(), first);
+    assert.equal(calls.length, 0);
+    layers.push(bedrock);
+    assert.notEqual(key(), first);
+    model.artefacts.push({ id: "find", centerX: 3, depth: 2, exposure: "partial" });
+    const partial = key();
+    quadrants = [0, 2];
+    assert.notEqual(key(), partial);
+    draw();
+    assert.equal(calls.length, 0);
+    model.depths[1][2] = 4;
+    draw();
+    assert.equal(scene.frameStats.profileColumnsDrawn, 6);
+    assert.ok(calls.length > 0);
+    assert.ok(calls.some(([, y]) => y === profile.y + 4 * 5), "bedrock is visible at full depth");
+    const canvas = scene.profileGeology.canvas;
+    scene.releaseProfile();
+    assert.equal(canvas.width, 1);
+  } finally {
+    if (oldDoc === undefined) delete sandbox.document;
+    else sandbox.document = oldDoc;
   }
 });
 

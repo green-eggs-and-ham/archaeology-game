@@ -3,7 +3,11 @@
 
   const { STATUS, LOCATION, TOOL, FACE } = root.CleaningConstants;
 
+  const alphabetical = new Intl.Collator(undefined, { sensitivity: "base" });
+
   const OWNED_STATE = [
+    "inventoryPanel",
+    "inventoryOrder",
     "cleaningTool",
     "cleaningInventoryPage",
     "cleaningInventorySort",
@@ -15,6 +19,8 @@
   ];
 
   const STATE_DEFAULTS = {
+    inventoryPanel: () => null,
+    inventoryOrder: () => null,
     cleaningTool: () => TOOL.HAND,
     cleaningInventoryPage: () => 0,
     cleaningInventorySort: () => "type",
@@ -50,6 +56,7 @@
     }
 
     leave() {
+      this.context.releaseInventory();
       if (this.context.pointerAction?.type === "cleaning-item") this.context.restoreCleaningDrag();
       this.context.pointerAction = null;
       this.cleaningInventorySortChooserOpen = false;
@@ -59,6 +66,7 @@
     }
 
     handleResize() {
+      this.context.releaseInventory();
       if (this.context.pointerAction?.type === "cleaning-item") this.context.restoreCleaningDrag();
       if (this.context.currentScene === "cleaning") this.context.pointerAction = null;
       this.cleaningInventorySortChooserOpen = false;
@@ -294,20 +302,24 @@
     return `${words.slice(0, bestIndex).join(" ")}\n${words.slice(bestIndex).join(" ")}`;
   }
 
-  cleaningInventoryArtefacts() {
-    const active = this.activeCleaningArtefact();
+  cleaningInventoryArtefacts(active = this.activeCleaningArtefact()) {
     const collected = this.allCollectedArtefacts().filter(
       (artefact) => artefact !== active || this.cleaningModel.workflowLocation(artefact) === LOCATION.INVENTORY
     );
     const sort = this.cleaningInventorySort || "type";
+    const order = this.inventoryOrder;
+    if (order?.sort === sort && order.sequence === this.nextCollectionSequence && order.members.length === collected.length &&
+        collected.every((item, index) => item === order.members[index] &&
+          (sort !== "status" || order.statuses[index] === this.cleaningModel.workflowStatus(item)))) return order.sorted;
+
     const byName = (first, second) => {
-      const nameComparison = String(first.label || "").localeCompare(String(second.label || ""), undefined, { sensitivity: "base" });
+      const nameComparison = alphabetical.compare(first.label || "", second.label || "");
       if (nameComparison !== 0) return nameComparison;
       const byCollection = this.collectionSequence(first) - this.collectionSequence(second);
       if (byCollection !== 0) return byCollection;
       return String(first.id || "").localeCompare(String(second.id || ""));
     };
-    return [...collected].sort((first, second) => {
+    const sorted = [...collected].sort((first, second) => {
       if (sort === "collection") {
         const byCollection = this.collectionSequence(first) - this.collectionSequence(second);
         return byCollection || byName(first, second);
@@ -319,16 +331,55 @@
       if (sort === "name") return byName(first, second);
       const byAvailability = Number(!first.cleanable) - Number(!second.cleanable);
       if (byAvailability) return byAvailability;
-      const byCategory = String(first.category || first.shape || "other").localeCompare(
-        String(second.category || second.shape || "other"),
-        undefined,
-        { sensitivity: "base" }
-      );
+      const byCategory = alphabetical.compare(first.category || first.shape || "other", second.category || second.shape || "other");
       return byCategory || byName(first, second);
     });
+    this.inventoryOrder = { sort, sorted, members: collected, sequence: this.nextCollectionSequence,
+      statuses: sort === "status" ? collected.map((item) => this.cleaningModel.workflowStatus(item)) : null };
+    if (this.frameStats) this.frameStats.inventorySorts += 1;
+    return sorted;
+  }
+
+  releaseInventory() {
+    this.releaseCanvasBuffer(this.inventoryPanel);
+    this.inventoryPanel = null;
+    this.inventoryOrder = null;
+    this.updateCanvasPixelStats();
   }
 
   drawCleaningInventory() {
+    const active = this.activeCleaningArtefact();
+    const artefacts = this.cleaningInventoryArtefacts(active);
+    const { columns, rows } = this.cleaningInventoryGrid();
+    const pageSize = columns * rows;
+    const pages = Math.max(1, Math.ceil(artefacts.length / pageSize));
+    this.cleaningInventoryPage = Math.max(0, Math.min(pages - 1, this.cleaningInventoryPage));
+    const visible = artefacts.slice(this.cleaningInventoryPage * pageSize, (this.cleaningInventoryPage + 1) * pageSize);
+    const panel = this.layout.inventory;
+    const bounds = this.panelCacheBounds(panel);
+    const appearances = visible.map((item) => [
+      item.id, item.label, item.visualKey, item.colour, item.cleanable, this.cleaningModel.workflowStatus(item),
+      this.cleaningModel.isDirtVisible(item) ? item.cleaning?.frontDirtRevision || 0 : 0
+    ].join("/"));
+    const key = [panel.x, panel.y, panel.width, panel.height, bounds.density, this.layout.isPortrait,
+      this.cleaningInventorySort, this.cleaningInventoryPage, pages, !visible.length && !!active, ...appearances].join(":");
+    if (this.inventoryPanel?.key === key && visible.every((item, i) => item === this.inventoryPanel.visible[i])) {
+      this.drawPanelCache(this.inventoryPanel, bounds);
+      Object.assign(this.layout, this.inventoryPanel.targets);
+      return;
+    }
+    this.paintCleaningInventory(active, visible, columns, rows, pages);
+    this.inventoryPanel = this.capturePanel(this.inventoryPanel, bounds, key);
+    if (this.inventoryPanel) {
+      const { inventorySortButton, inventorySlots, inventoryPreviousButton, inventoryNextButton } = this.layout;
+      this.inventoryPanel.targets = { inventorySortButton, inventorySlots, inventoryPreviousButton, inventoryNextButton };
+      this.inventoryPanel.visible = visible;
+    }
+    if (this.frameStats) this.frameStats.inventoryRebuilds += 1;
+    this.updateCanvasPixelStats();
+  }
+
+  paintCleaningInventory(active, visible, columns, rows, pages) {
     const bounds = this.layout.inventory;
     const portrait = this.layout.isPortrait;
     this.renderer.panel(bounds.x, bounds.y, bounds.width, bounds.height, "#ead9b9");
@@ -358,21 +409,14 @@
       portrait ? { minimumSize: 10, maximumSize: 12 } : { minimumSize: 8, maximumSize: 11 }
     );
 
-    const active = this.activeCleaningArtefact();
-    const artefacts = this.cleaningInventoryArtefacts();
-    const { columns, rows } = this.cleaningInventoryGrid(portrait);
-    const pageSize = columns * rows;
-    const pages = Math.max(1, Math.ceil(artefacts.length / pageSize));
-    this.cleaningInventoryPage = Math.max(0, Math.min(pages - 1, this.cleaningInventoryPage));
     const footerHeight = pages > 1 ? (portrait ? 22 : 25) : 5;
     const contentTop = this.layout.inventorySortButton.y + this.layout.inventorySortButton.height + 4;
     const contentHeight = Math.max(1, bounds.y + bounds.height - contentTop - footerHeight);
     const cellWidth = (bounds.width - 12) / columns;
     const cellHeight = contentHeight / rows;
-    const visible = artefacts.slice(this.cleaningInventoryPage * pageSize, (this.cleaningInventoryPage + 1) * pageSize);
     this.layout.inventorySlots = [];
 
-    if (!artefacts.length) {
+    if (!visible.length) {
       fill("#5c665e");
       textAlign(CENTER, CENTER);
       textSize(portrait ? Math.max(10, Math.min(13, bounds.width * 0.04)) : Math.max(9, Math.min(12, bounds.width * 0.055)));
@@ -975,6 +1019,7 @@
     if (this.currentScene === "trench") this.trenchScene.leave();
     this.currentScene = "cleaning";
     this.pointerAction = null;
+    this.siteScene?.sceneChanged();
     this.cleaningTool = TOOL.HAND;
     this.cleaningInventorySortChooserOpen = false;
     this.collectionFlights.length = 0;
@@ -1187,11 +1232,7 @@
 
   cleaningPointerStart(x, y) {
     if (this.pointIn(this.layout.labBackButton, x, y)) {
-      this.cleaningScene.leave();
-      this.currentScene = "site";
-      this.message = "Choose a trench or return to the finds lab.";
-      this.messageTone = "neutral";
-      this.requestFrame();
+      this.enterSiteMap();
       return;
     }
     if (this.cleaningInventorySortChooserOpen) {

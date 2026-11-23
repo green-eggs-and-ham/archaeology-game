@@ -37,14 +37,14 @@ test("the debug ridge control toggles direction while retaining compatible terra
   assert.equal(scene.terrainWorkerDesiredKey, null);
 });
 
-test("all six diagnostics live in a two-column overlay without reserving scene space", () => {
+test("all eight diagnostics live in a two-column overlay without reserving scene space", () => {
   const scene = manager();
   sandbox.width = 600;
   sandbox.height = 400;
   scene.debugMenuOpen = true;
   const debug = scene.debugMenuLayout();
-  assert.equal(debug.options.length, 6);
-  assert.deepEqual(Array.from(debug.options, (entry) => entry.id), ["depth", "performance", "smoothing", "pillar", "ridge", "water"]);
+  assert.equal(debug.options.length, 8);
+  assert.deepEqual(Array.from(debug.options, (entry) => entry.id), ["depth", "performance", "smoothing", "pillar", "ridge", "water", "map", "iso-pause"]);
   assert.equal(debug.button.width, 44);
   assert.equal(debug.button.height, 44);
   debug.options.forEach((option) => {
@@ -564,7 +564,8 @@ test("the trench finds indicator shows six icons when space permits and uses an 
 test("Finds lab buttons use numeric notification badges instead of bracketed labels", () => {
   assert.match(rendererSource, /notificationBadge\(bounds, count\)/);
   assert.match(rendererSource, /badgeCount/);
-  assert.match(sceneManagerSource, /button\(this\.layout\.labButton, "Finds lab"/);
+  const siteSource = fs.readFileSync(path.join(__dirname, "../src/scenes/SiteMapScene.js"), "utf8");
+  assert.match(siteSource, /button\(host\.layout\.labButton, "Finds lab"/);
   assert.match(trenchSceneSource, /button\(this\.layout\.findsLabButton, "Finds lab"/);
   assert.doesNotMatch(`${sceneManagerSource}\n${trenchSceneSource}`, /Finds lab \(\$\{this\.pendingCleaningCount\(\)\}\)/);
 });

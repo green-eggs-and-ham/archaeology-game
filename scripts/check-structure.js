@@ -17,6 +17,9 @@ const scriptOrder = [
   "src/game/Renderer.js",
   "src/game/TerrainGraphics.js",
   "src/game/TerrainPipeline.js",
+  "src/game/TrenchPreviewGraphics.js",
+  "src/game/TrenchPreviewPipeline.js",
+  "src/scenes/SiteMapScene.js",
   "src/scenes/CleaningScene.js",
   "src/scenes/TrenchScene.js",
   "src/game/SceneManager.js",
@@ -40,6 +43,9 @@ assert.doesNotMatch(index, /<script[^>]+type=["']module["']/i, "The zero-build r
 const worker = read("src/game/TerrainWorker.js");
 assert.match(worker, /importScripts\(["']\.\/TerrainGraphics\.js["']\)/);
 assert.doesNotMatch(worker, /SceneManager|TrenchScene|CleaningScene/);
+const previewWorker = read("src/game/TrenchPreviewWorker.js");
+assert.match(previewWorker, /importScripts\([\s\S]*TrenchPreviewGraphics\.js/);
+assert.doesNotMatch(previewWorker, /SceneManager|SiteMapScene|TrenchScene|CleaningScene/);
 
 const validator = read("src/game/GameConfigValidator.js");
 assert.doesNotMatch(
@@ -52,7 +58,7 @@ assert.ok(lineCount("src/game/SceneManager.js") <= 1200, "SceneManager has regro
 assert.ok(lineCount("src/scenes/TrenchScene.js") <= 1500, "TrenchScene needs another cohesive extraction");
 assert.ok(lineCount("src/scenes/CleaningScene.js") <= 1500, "CleaningScene needs another cohesive extraction");
 
-for (const relativePath of ["src/scenes/TrenchScene.js", "src/scenes/CleaningScene.js"]) {
+for (const relativePath of ["src/scenes/TrenchScene.js", "src/scenes/CleaningScene.js", "src/scenes/SiteMapScene.js"]) {
   assert.doesNotMatch(read(relativePath), /\bredraw\s*\(/, `${relativePath} must use the injected frame scheduler`);
 }
 

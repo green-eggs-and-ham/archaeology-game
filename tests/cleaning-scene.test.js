@@ -69,6 +69,54 @@ test("inventory sorting always includes every find and prioritises cleanable typ
   assert.equal(manager.portraitInventoryLabel("Verulamium flagon sherd").replace("\n", " "), "Verulamium flagon sherd");
 });
 
+test("inventory redraws reuse slot targets and thumbnails until the displayed contents change", () => {
+  const manager = Object.create(sandbox.window.SceneManager.prototype);
+  const finds = Array.from({ length: 5 }, (_, i) => artefact("mortarium", "slot-" + i));
+  finds.forEach((find) => { find.exposure = "collected"; });
+  manager.cleaningModel = new CleaningModel(config.cleaning);
+  manager.trenches = [{ artefacts: finds }];
+  manager.collectionOrderByArtefactId = new Map(finds.map((item, i) => [item.id, i]));
+  manager.cleaningInventorySort = "collection";
+  manager.cleaningInventoryPage = 0;
+  manager.frameStats = { inventorySorts: 0, inventoryRebuilds: 0 };
+  manager.updateCanvasPixelStats = manager.drawPanelCache = () => {};
+  manager.capturePanel = (_old, _bounds, key) => ({ key });
+  manager.paintCleaningInventory = (_active, visible) => {
+    manager.layout.inventorySlots = visible.map((artefact) => ({ artefact, bounds: {} }));
+    manager.layout.inventoryNextButton = { x: 12 };
+  };
+  const draw = () => {
+    manager.layout = { isPortrait: true, inventory: { x: 1, y: 2, width: 250, height: 120 } };
+    manager.drawCleaningInventory();
+  };
+  draw();
+  const slots = manager.layout.inventorySlots;
+  draw();
+  assert.equal(manager.layout.inventorySlots, slots);
+  assert.deepEqual(manager.frameStats, { inventorySorts: 1, inventoryRebuilds: 1 });
+  manager.cleaningModel.dampen(finds[4]); // off-page status does not affect collection order
+  draw();
+  assert.equal(manager.frameStats.inventoryRebuilds, 1);
+  manager.cleaningModel.dampen(finds[0]);
+  draw();
+  assert.equal(manager.frameStats.inventoryRebuilds, 2);
+  manager.cleaningModel.handwashDunk(finds[0]);
+  draw();
+  assert.equal(manager.frameStats.inventoryRebuilds, 3, "front dirt changed at the same wet status");
+  manager.cleaningModel.placeOnMat(finds[0]);
+  draw();
+  assert.equal(manager.frameStats.inventorySorts, 2);
+  manager.cleaningModel.handwashDunk(finds[0]);
+  draw();
+  assert.equal(manager.frameStats.inventoryRebuilds, 4, "washing the bench item reuses the remaining thumbnails");
+  manager.cleaningInventoryPage = 1;
+  draw();
+  assert.equal(manager.layout.inventorySlots[0].artefact, finds[4]);
+  manager.cleaningInventorySort = "status";
+  draw();
+  assert.equal(manager.frameStats.inventorySorts, 3);
+});
+
 test("pending cleaning badges count unfinished cleanable workflows only", () => {
   const SceneManager = sandbox.window.SceneManager;
   const manager = Object.create(SceneManager.prototype);

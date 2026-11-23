@@ -58,6 +58,10 @@ vm.runInContext(terrainGraphicsSource, sandbox);
 vm.runInContext(terrainPipelineSource, sandbox);
 vm.runInContext(cleaningSceneSource, sandbox);
 vm.runInContext(trenchSceneSource, sandbox);
+for (const file of ["TrenchPreviewGraphics.js", "TrenchPreviewPipeline.js"]) {
+  vm.runInContext(fs.readFileSync(path.join(__dirname, "../../src/game", file), "utf8"), sandbox);
+}
+vm.runInContext(fs.readFileSync(path.join(__dirname, "../../src/scenes/SiteMapScene.js"), "utf8"), sandbox);
 vm.runInContext(sceneManagerSource, sandbox);
 const SceneManager = sandbox.window.SceneManager;
 

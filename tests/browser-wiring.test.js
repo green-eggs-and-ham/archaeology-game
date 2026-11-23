@@ -221,7 +221,28 @@ test("compact canvases cap high-density phones at DPR 2 within the pixel budget"
   assert.equal(context.getCanvasPixelDensity({ width: 560, height: 747 }), 1, "the bounded pixel budget prevents an oversized backing surface");
   context.window.innerWidth = 960;
   assert.equal(context.getCanvasPixelDensity({ width: 960, height: 540 }), 1);
-  assert.match(mainSource, /pixelDensity\(activeCanvasDensity\);\s*const canvas = createCanvas/s);
+  const events = {};
+  let density = 1;
+  const config = context.window.GameConfig.canvas;
+  Object.assign(config, { maxWidth: 1280, aspectRatio: 16 / 9, portraitAspectRatio: 0.75 });
+  Object.assign(context.window, {
+    innerWidth: 375, addEventListener() {},
+    matchMedia: () => ({ addEventListener: (name, fn) => { events[name] = fn; }, removeEventListener() {} }),
+    GameConfigValidator: { validate() {} }, ArtefactRenderer: { visualRegistry() {} },
+    SceneManager: class { constructor() { this.siteScene = { prepare() {} }; this.trenches = []; } handleResize() {} }
+  });
+  context.document.getElementById = () => ({ clientWidth: 349 });
+  context.createCanvas = (w, h) => {
+    context.width = w; context.height = h; density = context.window.devicePixelRatio;
+    return { parent() {}, elt: { setAttribute() {}, addEventListener() {} } };
+  };
+  context.pixelDensity = (value) => { if (value !== undefined) density = value; return density; };
+  context.noLoop = context.redraw = () => {};
+  context.setup();
+  assert.equal(density, 2, "the newly created renderer honours the cold-start budget");
+  context.window.devicePixelRatio = 1.25;
+  events.change();
+  assert.equal(density, 1.25, "a density-only change reapplies the budget");
 });
 
 test("the page reserves its canvas and exposes progressive boot and failure states", () => {
@@ -231,8 +252,8 @@ test("the page reserves its canvas and exposes progressive boot and failure stat
   assert.match(indexSource, /GameBoot\.resourceFailed/);
   assert.match(indexSource, /loader\.remove\(\)/);
   assert.match(indexSource, /querySelectorAll\("#p5_loading"\)/);
-  assert.equal((indexSource.match(/<script defer/g) || []).length, 15);
-  assert.match(indexSource, /window\.GameBoot\s*=\s*\{[\s\S]*?total:\s*15,/);
+  assert.equal((indexSource.match(/<script defer/g) || []).length, 18);
+  assert.match(indexSource, /window\.GameBoot\s*=\s*\{[\s\S]*?total:\s*18,/);
   assert.match(indexSource, /GameConfigValidator\.js[\s\S]*ArtefactCatalogue\.js[\s\S]*TrenchModel\.js/);
   assert.match(indexSource, /ArtefactRenderer\.js[\s\S]*Renderer\.js/);
   assert.match(indexSource, /TerrainGraphics\.js[\s\S]*TerrainPipeline\.js/);

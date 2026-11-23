@@ -1,6 +1,8 @@
 let sceneManager;
 let firstFramePresented = false;
 let activeCanvasDensity = 1;
+let canvasResizeObserver = null;
+let densityQuery = null;
 
 function getCanvasSize() {
   const shell = document.getElementById("game-shell");
@@ -32,6 +34,17 @@ function getCanvasPixelDensity(size) {
     : 1;
 }
 
+function watchDisplayDensity() {
+  densityQuery?.removeEventListener("change", displayDensityChanged);
+  densityQuery = window.matchMedia?.(`(resolution: ${window.devicePixelRatio || 1}dppx)`);
+  densityQuery?.addEventListener("change", displayDensityChanged);
+}
+
+function displayDensityChanged() {
+  watchDisplayDensity();
+  windowResized();
+}
+
 function setup() {
   try {
     window.GameConfigValidator.validate(window.GameConfig, {
@@ -44,14 +57,39 @@ function setup() {
 
   const size = getCanvasSize();
   activeCanvasDensity = getCanvasPixelDensity(size);
-  pixelDensity(activeCanvasDensity);
   const canvas = createCanvas(size.width, size.height);
+  // p5 creates a new renderer using the display DPR. Apply the budget to that
+  // renderer so a cold launch gets the same backing store as a later resize.
+  if (pixelDensity() !== activeCanvasDensity) pixelDensity(activeCanvasDensity);
   canvas.parent("game-shell");
   canvas.elt.setAttribute("aria-label", "Archaeology excavation and artefact cleaning game");
   noLoop();
 
   sceneManager = new window.SceneManager(window.GameConfig);
   window.sceneManager = sceneManager;
+  sceneManager.previewBootTracking = true;
+  window.GameBoot?.addResources(sceneManager.trenches.length);
+  sceneManager.siteScene.prepare();
+  // Removing the boot overlay can change the flex shell's measured width.
+  // Follow the actual host size as well as browser-window resize events.
+  if (typeof ResizeObserver === "function") {
+    canvasResizeObserver = new ResizeObserver(() => {
+      const next = getCanvasSize();
+      if (next.width !== width || next.height !== height || getCanvasPixelDensity(next) !== activeCanvasDensity) windowResized();
+      else if (sceneManager.currentScene === "site") sceneManager.requestFrame();
+    });
+    canvasResizeObserver.observe(document.getElementById("game-shell"));
+  }
+  watchDisplayDensity();
+  window.addEventListener("pagehide", (event) => {
+    if (event.persisted) return;
+    canvasResizeObserver?.disconnect();
+    densityQuery?.removeEventListener("change", displayDensityChanged);
+    sceneManager.releaseInventory();
+    sceneManager.releaseProfile();
+    sceneManager.siteScene.dispose();
+    sceneManager.terrainPipeline.dispose();
+  });
   installCanvasPointerEvents(canvas.elt);
   redraw();
 }
@@ -106,7 +144,7 @@ function installCanvasPointerEvents(canvas) {
 
 function draw() {
   sceneManager.draw();
-  if (!firstFramePresented) {
+  if (!firstFramePresented && sceneManager.siteScene.isReady()) {
     firstFramePresented = true;
     window.GameBoot?.markReady();
   }
@@ -115,11 +153,9 @@ function draw() {
 function windowResized() {
   const size = getCanvasSize();
   const nextDensity = getCanvasPixelDensity(size);
-  if (nextDensity !== activeCanvasDensity) {
-    activeCanvasDensity = nextDensity;
-    pixelDensity(activeCanvasDensity);
-  }
-  resizeCanvas(size.width, size.height);
+  activeCanvasDensity = nextDensity;
+  if (pixelDensity() !== nextDensity) pixelDensity(nextDensity);
+  if (width !== size.width || height !== size.height) resizeCanvas(size.width, size.height, true);
   sceneManager.handleResize();
   redraw();
 }

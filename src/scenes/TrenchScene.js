@@ -5,6 +5,7 @@
     "tool",
     "activeTrench",
     "profileCache",
+    "profileGeology",
     "brushParticles",
     "depositedClumps",
     "collectionFlights",
@@ -18,6 +19,7 @@
     tool: () => "scoop",
     activeTrench: () => null,
     profileCache: () => null,
+    profileGeology: () => null,
     brushParticles: () => [],
     depositedClumps: () => [],
     collectionFlights: () => [],
@@ -57,6 +59,7 @@
       this.context.pointerAction = null;
       this.collectionFlights.length = 0;
       this.terrainPipeline.invalidateTerrainCache();
+      this.context.releaseProfile();
       this.brushParticles.length = 0;
       this.depositedClumps.length = 0;
     }
@@ -66,8 +69,7 @@
     }
 
     handleResize() {
-      this.terrainPipeline.releaseCanvasBuffer(this.profileCache);
-      this.profileCache = null;
+      this.context.releaseProfile();
       this.collectionFlights.length = 0;
       this.brushParticles.length = 0;
       this.depositedClumps.length = 0;
@@ -338,101 +340,36 @@
     textStyle(NORMAL);
   }
 
-  profileCacheBounds(profile) {
-    const x = Math.floor(profile.x);
-    const y = Math.floor(profile.y);
-    return {
-      x,
-      y,
-      width: Math.ceil(profile.x + profile.width + 4) - x,
-      height: Math.ceil(profile.y + profile.height + 5) - y
-    };
+  releaseProfile() {
+    this.releaseCanvasBuffer(this.profileCache);
+    this.releaseCanvasBuffer(this.profileGeology);
+    this.profileCache = null;
+    this.profileGeology = null;
+    this.updateCanvasPixelStats();
   }
 
   profileCacheKey(trench, profile) {
-    return [
-      trench.id,
-      trench.visualRevision ?? 0,
-      this.layout.isPortrait ? 1 : 0,
-      profile.x.toFixed(2),
-      profile.y.toFixed(2),
-      profile.width.toFixed(2),
-      profile.height.toFixed(2)
-    ].join(":");
-  }
-
-  ensureProfileCacheSurface(bounds) {
-    const density = typeof pixelDensity === "function" ? pixelDensity() : 1;
-    const pixelWidth = Math.max(1, Math.ceil(bounds.width * density));
-    const pixelHeight = Math.max(1, Math.ceil(bounds.height * density));
-    const existing = this.profileCache;
-    if (existing?.canvas && existing.pixelWidth === pixelWidth && existing.pixelHeight === pixelHeight && existing.density === density) {
-      return existing;
-    }
-    this.releaseCanvasBuffer(existing);
-    let canvas = null;
-    if (typeof document !== "undefined") canvas = document.createElement("canvas");
-    else if (typeof OffscreenCanvas !== "undefined") canvas = new OffscreenCanvas(pixelWidth, pixelHeight);
-    if (!canvas) return null;
-    canvas.width = pixelWidth;
-    canvas.height = pixelHeight;
-    this.profileCache = {
-      key: null,
-      canvas,
-      context: canvas.getContext("2d", { alpha: true }),
-      pixelWidth,
-      pixelHeight,
-      density
-    };
-    this.updateCanvasPixelStats();
-    return this.profileCache;
-  }
-
-  drawProfileCache(bounds) {
-    if (this.profileCache?.canvas) {
-      drawingContext.drawImage(this.profileCache.canvas, bounds.x, bounds.y, bounds.width, bounds.height);
-    } else if (this.profileCache?.image) {
-      image(this.profileCache.image, bounds.x, bounds.y, bounds.width, bounds.height);
-    }
-  }
-
-  captureProfileCache(bounds, key) {
-    const cache = this.ensureProfileCacheSurface(bounds);
-    if (cache?.context && drawingContext?.canvas) {
-      cache.context.setTransform(1, 0, 0, 1, 0, 0);
-      cache.context.clearRect(0, 0, cache.pixelWidth, cache.pixelHeight);
-      const density = cache.density;
-      cache.context.drawImage(
-        drawingContext.canvas,
-        bounds.x * density,
-        bounds.y * density,
-        bounds.width * density,
-        bounds.height * density,
-        0,
-        0,
-        cache.pixelWidth,
-        cache.pixelHeight
-      );
-      cache.key = key;
-    } else if (typeof get === "function") {
-      this.profileCache = {
-        key,
-        image: get(bounds.x, bounds.y, bounds.width, bounds.height)
-      };
-    }
-    this.updateCanvasPixelStats();
+    const markers = trench.artefacts.filter((find) => find.exposure !== "hidden").map((find) =>
+      [find.id, find.exposure, find.centerX, find.depth, find.cleaning?.activeFace, trench.artefactVisibleQuadrants(find).join("")].join("/")
+    );
+    return [trench.id, this.layout.isPortrait, profile.x, profile.y, profile.width, profile.height,
+      typeof pixelDensity === "function" ? pixelDensity() : 1,
+      trench.depths[Math.floor(trench.rows / 2)].join(","),
+      trench.getDiscoveredLayers().map((layer) => layer.id).join(","),
+      markers.join(",")].join(":");
   }
 
   drawCachedProfile(trench, profile) {
-    const bounds = this.profileCacheBounds(profile);
+    const bounds = this.panelCacheBounds(profile);
     const key = this.profileCacheKey(trench, profile);
-    if (this.profileCache?.key === key && (this.profileCache.canvas || this.profileCache.image)) {
-      this.drawProfileCache(bounds);
+    if (this.profileCache?.key === key) {
+      this.drawPanelCache(this.profileCache, bounds);
       this.frameStats.profileCacheHits += 1;
       return;
     }
     this.drawProfile(trench, profile);
-    this.captureProfileCache(bounds, key);
+    this.profileCache = this.capturePanel(this.profileCache, bounds, key);
+    this.updateCanvasPixelStats();
     this.frameStats.profileRebuilds += 1;
   }
 
@@ -454,7 +391,6 @@
       height: Math.max(26, diagram.height)
     };
     const levelHeight = inner.height / (trench.maxDepth + 1);
-    const sampleRow = Math.floor(trench.rows / 2);
     fill("#24444a");
     noStroke();
     textAlign(LEFT, TOP);
@@ -467,29 +403,7 @@
     fill("#b8ac94");
     rect(inner.x, inner.y, inner.width, inner.height, 2);
     const columnWidth = inner.width / trench.columns;
-    for (let column = 0; column < trench.columns; column += 1) {
-      const revealedDepth = trench.getDepth(column, sampleRow);
-      const columnX = inner.x + column * columnWidth;
-      for (let depth = 0; depth < revealedDepth; depth += 1) {
-        const layer = trench.getStratumAt(column, sampleRow, depth);
-        const faceColour = this.depthTintColour(layer.colour, depth, trench.maxDepth);
-        const top = inner.y + depth * levelHeight;
-        noStroke();
-        fill(this.mutedColour(faceColour));
-        rect(columnX, top, columnWidth + 0.5, levelHeight + 0.5);
-        fill(faceColour);
-        rect(columnX + 1.2, top + 1.2, Math.max(1, columnWidth - 2.1), Math.max(1, levelHeight - 2.1));
-      }
-      if (revealedDepth >= trench.maxDepth) {
-        const bedrockTop = inner.y + trench.maxDepth * levelHeight;
-        const bedrockColour = this.depthTintColour(trench.bedrock.colour, trench.maxDepth, trench.maxDepth);
-        noStroke();
-        fill(this.mutedColour(bedrockColour));
-        rect(columnX, bedrockTop, columnWidth + 0.5, levelHeight + 0.5);
-        fill(bedrockColour);
-        rect(columnX + 1.2, bedrockTop + 1.2, Math.max(1, columnWidth - 2.1), Math.max(1, levelHeight - 2.1));
-      }
-    }
+    this.drawProfileGeology(trench, inner, columnWidth, levelHeight);
 
     stroke("#5e6b70");
     strokeWeight(1);
@@ -539,6 +453,72 @@
       width: keyWidth,
       height: diagram.height
     });
+  }
+
+  drawProfileGeology(trench, inner, columnWidth, levelHeight) {
+    const density = typeof pixelDensity === "function" ? pixelDensity() : 1;
+    const left = Math.floor(inner.x * density), top = Math.floor(inner.y * density);
+    const pixelWidth = Math.ceil((inner.x + inner.width + 2.2) * density) - left;
+    const pixelHeight = Math.ceil((inner.y + inner.height + 2.2) * density) - top;
+    const key = [trench.id, inner.x, inner.y, inner.width, inner.height, density].join(":");
+    const row = Math.floor(trench.rows / 2);
+    const depths = trench.depths[row];
+    let cache = this.profileGeology;
+    if (cache?.key !== key) {
+      this.releaseCanvasBuffer(cache);
+      const canvas = document.createElement("canvas");
+      canvas.width = pixelWidth;
+      canvas.height = pixelHeight;
+      cache = this.profileGeology = {
+        key, canvas, pixelWidth, pixelHeight, context: canvas.getContext("2d"),
+        depths: new Int16Array(trench.columns).fill(-1), colours: new Map()
+      };
+      this.updateCanvasPixelStats();
+    }
+    const ctx = cache.context;
+    for (let column = 0; column < trench.columns;) {
+      if (cache.depths[column] === depths[column]) { column += 1; continue; }
+      const start = column;
+      while (column < trench.columns && cache.depths[column] !== depths[column]) {
+        cache.depths[column] = depths[column];
+        column += 1;
+      }
+      this.frameStats.profileColumnsDrawn += column - start;
+      // Invalidate whole device pixels and replay the neighbours whose
+      // original half-pixel overlaps touch them, in their original paint order.
+      const overhang = Math.max(0.5, 1.2 + Math.max(1, columnWidth - 2.1) - columnWidth);
+      const dirtyLeft = Math.floor((inner.x + start * columnWidth) * density) - left;
+      const dirtyRight = Math.ceil((inner.x + column * columnWidth + overhang) * density) - left;
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(dirtyLeft, 0, dirtyRight - dirtyLeft, pixelHeight);
+      ctx.clip();
+      ctx.clearRect(dirtyLeft, 0, dirtyRight - dirtyLeft, pixelHeight);
+      ctx.setTransform(density, 0, 0, density, -left, -top);
+      const first = Math.max(0, Math.floor(((left + dirtyLeft) / density - inner.x - overhang) / columnWidth));
+      const end = Math.min(trench.columns, Math.ceil(((left + dirtyRight) / density - inner.x) / columnWidth));
+      for (let col = first; col < end; col += 1) {
+        const x = inner.x + col * columnWidth;
+        const count = depths[col] === trench.maxDepth ? trench.maxDepth + 1 : depths[col];
+        for (let depth = 0; depth < count; depth += 1) {
+          const layer = trench.getStratumAt(col, row, depth);
+          const colourKey = depth + ":" + layer.id;
+          let tint = cache.colours.get(colourKey);
+          if (!tint) {
+            const face = this.depthTintColour(layer.colour, depth, trench.maxDepth);
+            tint = { face, border: this.mutedColour(face).toString() };
+            cache.colours.set(colourKey, tint);
+          }
+          const y = inner.y + depth * levelHeight;
+          ctx.fillStyle = tint.border;
+          ctx.fillRect(x, y, columnWidth + 0.5, levelHeight + 0.5);
+          ctx.fillStyle = tint.face;
+          ctx.fillRect(x + 1.2, y + 1.2, Math.max(1, columnWidth - 2.1), Math.max(1, levelHeight - 2.1));
+        }
+      }
+      ctx.restore();
+    }
+    drawingContext.drawImage(cache.canvas, left / density, top / density, pixelWidth / density, pixelHeight / density);
   }
 
   drawLayerKey(trench, bounds) {
@@ -1080,11 +1060,16 @@
     if (!artefact || !this.activeTrench) return null;
     if (typeof this.activeTrench.collectArtefact === "function") {
       const collected = this.activeTrench.collectArtefact(artefact);
-      if (collected) return collected;
+      if (collected) {
+        this.siteScene.changed(this.activeTrench);
+        return collected;
+      }
     }
     const footprintCell = artefact.footprint?.[0];
     if (!footprintCell || typeof this.activeTrench.collectAt !== "function") return null;
-    return this.activeTrench.collectAt(footprintCell.x, footprintCell.y);
+    const collected = this.activeTrench.collectAt(footprintCell.x, footprintCell.y);
+    if (collected) this.siteScene.changed(this.activeTrench);
+    return collected;
   }
 
   brushTravelThreshold() {
@@ -1166,6 +1151,7 @@
     const result = this.activeTrench.brushAt(center.x, center.y);
     this.updateArtefactCoachCompletion();
     if (result.changed) {
+      this.siteScene.changed(this.activeTrench);
       result.removedLayers.forEach((removed) => this.spawnBrushParticles(removed, removed.layer));
       this.message = "Careful brushing exposes another part of the profile.";
       this.messageTone = "neutral";
@@ -1221,6 +1207,7 @@
 
     const cell = this.cellAt(x, y);
     if (!cell) return;
+    this.siteScene.excavationStarted();
     this.setPointerToolUse(this.tool);
     if (this.tool === "brush") {
       this.pointerAction = { type: "brush", lastPoint: { x, y }, travelRemainder: 0 };
@@ -1232,7 +1219,10 @@
     const scoopCheck = this.activeTrench.canScoop(toolCenter.x, toolCenter.y);
     this.recordShovelAttempt(scoopCheck.artefact || null);
     if (!scoopCheck.allowed) {
-      if (scoopCheck.artefact) this.activeTrench.partiallyExpose(scoopCheck.artefact);
+      if (scoopCheck.artefact) {
+        this.activeTrench.partiallyExpose(scoopCheck.artefact);
+        this.siteScene.changed(this.activeTrench);
+      }
       this.message = scoopCheck.reason;
       this.messageTone = scoopCheck.artefact ? "warning" : "neutral";
       this.requestFrame();
@@ -1254,11 +1244,7 @@
   }
 
   leaveTrenchToSite() {
-    this.trenchScene.leave();
-    this.currentScene = "site";
-    this.message = "Choose a trench to continue exploring.";
-    this.messageTone = "neutral";
-    this.requestFrame();
+    this.enterSiteMap();
   }
 
   trenchPointerMove(x, y) {
@@ -1278,6 +1264,7 @@
 
   trenchPointerEnd(x, y, source = "mouse") {
     if (!this.pointerAction) {
+      this.siteScene.gestureEnded();
       if (source === "touch") this.pointer = null;
       this.requestFrame();
       return;
@@ -1289,6 +1276,7 @@
         this.message = result.reason;
         this.messageTone = result.allowed ? "neutral" : "warning";
         if (result.allowed) {
+          this.siteScene.changed(this.activeTrench);
           this.spawnDepositedClump(x, y, result.soilColours || this.pointerAction.soilColours, {
             velocity: flickVelocity,
             clumpWeight: result.clumpWeight || this.pointerAction.clumpWeight
@@ -1301,12 +1289,14 @@
       }
     }
     this.pointerAction = null;
+    this.siteScene.gestureEnded();
     if (source === "touch") this.pointer = null;
     this.requestFrame();
   }
 
   trenchPointerCancel(x, y, source = "mouse") {
     this.pointerAction = null;
+    this.siteScene.gestureEnded();
     this.pointer = source === "touch" ? null : { x, y, source, pressed: false };
     this.messageTone = "neutral";
     this.requestFrame();

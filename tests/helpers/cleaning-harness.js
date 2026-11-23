@@ -62,6 +62,9 @@ vm.runInContext(fs.readFileSync(path.join(__dirname, "../../src/game/CleaningMod
 vm.runInContext(fs.readFileSync(path.join(__dirname, "../../src/game/TerrainPipeline.js"), "utf8"), sandbox);
 vm.runInContext(fs.readFileSync(path.join(__dirname, "../../src/scenes/CleaningScene.js"), "utf8"), sandbox);
 vm.runInContext(fs.readFileSync(path.join(__dirname, "../../src/scenes/TrenchScene.js"), "utf8"), sandbox);
+for (const file of ["src/game/TrenchPreviewGraphics.js", "src/game/TrenchPreviewPipeline.js", "src/scenes/SiteMapScene.js"]) {
+  vm.runInContext(fs.readFileSync(path.join(__dirname, "../..", file), "utf8"), sandbox);
+}
 vm.runInContext(fs.readFileSync(path.join(__dirname, "../../src/game/SceneManager.js"), "utf8"), sandbox);
 
 const CleaningModel = sandbox.window.CleaningModel;
